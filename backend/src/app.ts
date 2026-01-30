@@ -53,6 +53,22 @@ app.get('/health', (_req: Request, res: Response) => {
   });
 });
 
+// Root endpoint - API info
+app.get('/', (_req: Request, res: Response) => {
+  res.json({
+    name: 'Email Scheduler API',
+    version: '2.0.0',
+    status: 'running',
+    documentation: '/api',
+    endpoints: {
+      health: '/health',
+      auth: '/api/auth',
+      emails: '/api/emails',
+    },
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/emails', emailRoutes);
