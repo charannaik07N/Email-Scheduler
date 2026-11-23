@@ -65,3 +65,6 @@ temp/
 .cache/
 .npm/
 .eslintcache
+# Local credentials notes (never commit)
+supabase details.txt
+*.credentials.txt

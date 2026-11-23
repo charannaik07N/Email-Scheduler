@@ -1,14 +1,8 @@
 @import "tailwindcss";
 
-/* Placeholder for contentEditable */
-[contenteditable][data-placeholder]:empty:before {
-  content: attr(data-placeholder);
-  color: #9ca3af;
-  pointer-events: none;
-  position: absolute;
-}
-
-[contenteditable] {
-  direction: ltr;
-  text-align: left;
-}
+/* Pane design system (copied unchanged from the Pane assets), then app pieces.
+   Pane's rules are unlayered, so they take precedence over Tailwind's layers;
+   Tailwind is only used for small layout utilities. */
+@import "./styles/pane/tokens.css";
+@import "./styles/pane/components.css";
+@import "./styles/app.css";

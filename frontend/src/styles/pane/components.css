@@ -1,0 +1,615 @@
+/* ==========================================================================
+   Pane components. Requires tokens.css.
+   Layers: content layer = opaque (.pane-surface, .pane-prose)
+           functional layer = glass (.pane-nav, .pane-toolbar, .pane-btn--glass)
+   ========================================================================== */
+
+/* ---- Base ---------------------------------------------------------------- */
+.pane-root,
+.pane-root body {
+  background: var(--pane-bg);
+  color: var(--pane-label);
+  font-family: var(--pane-font-sans);
+  font-size: var(--pane-text-body);
+  line-height: var(--pane-leading-body);
+  letter-spacing: var(--pane-tracking-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+.pane-root body { margin: 0; }
+/* Component display rules must never beat the hidden attribute. */
+.pane-root [hidden] { display: none !important; }
+.pane-root *, .pane-root *::before, .pane-root *::after { box-sizing: border-box; }
+
+/* Visible focus everywhere, keyboard only. */
+.pane-root :focus-visible {
+  outline: 2px solid var(--pane-focus);
+  outline-offset: 2px;
+}
+.pane-root :focus:not(:focus-visible) { outline: none; }
+
+.pane-skip-link {
+  position: absolute;
+  left: var(--pane-space-4);
+  top: var(--pane-space-2);
+  z-index: calc(var(--pane-z-dialog) + 1);
+  padding: var(--pane-space-2) var(--pane-space-4);
+  border-radius: var(--pane-radius-pill);
+  background: var(--pane-surface);
+  color: var(--pane-label);
+  font-weight: var(--pane-weight-semibold);
+  box-shadow: var(--pane-shadow-md);
+  transform: translateY(-200%);
+}
+.pane-skip-link:focus-visible { transform: none; }
+
+.pane-visually-hidden {
+  position: absolute !important;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%);
+  white-space: nowrap; border: 0;
+}
+
+/* ---- Layout --------------------------------------------------------------- */
+.pane-container {
+  width: 100%;
+  max-width: calc(var(--pane-page-max) + var(--pane-gutter) + var(--pane-gutter-end));
+  margin-inline: auto;
+  padding-left: var(--pane-gutter);
+  padding-right: var(--pane-gutter-end);
+}
+.pane-section { padding-block: var(--pane-space-20); }
+.pane-stack { display: flex; flex-direction: column; gap: var(--pane-space-4); }
+.pane-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pane-space-3); }
+
+/* ---- Type ----------------------------------------------------------------- */
+.pane-display, .pane-large-title, .pane-title-1, .pane-title-2, .pane-title-3 {
+  margin: 0;
+  font-weight: var(--pane-weight-semibold);
+  text-wrap: balance;
+}
+.pane-display {
+  font-size: var(--pane-text-display);
+  line-height: var(--pane-leading-tight);
+  letter-spacing: var(--pane-tracking-display);
+  font-weight: var(--pane-weight-bold);
+}
+.pane-large-title {
+  font-size: var(--pane-text-large-title);
+  line-height: var(--pane-leading-tight);
+  letter-spacing: var(--pane-tracking-display);
+  font-weight: var(--pane-weight-bold);
+}
+.pane-title-1 { font-size: var(--pane-text-title-1); line-height: var(--pane-leading-snug); letter-spacing: var(--pane-tracking-title); }
+.pane-title-2 { font-size: var(--pane-text-title-2); line-height: var(--pane-leading-snug); letter-spacing: var(--pane-tracking-title); }
+.pane-title-3 { font-size: var(--pane-text-title-3); line-height: var(--pane-leading-snug); }
+.pane-headline { font-size: var(--pane-text-body); font-weight: var(--pane-weight-semibold); }
+.pane-subhead { font-size: var(--pane-text-subhead); }
+.pane-footnote { font-size: var(--pane-text-footnote); }
+.pane-caption { font-size: var(--pane-text-caption); }
+.pane-eyebrow {
+  font-size: var(--pane-text-footnote);
+  font-weight: var(--pane-weight-semibold);
+  letter-spacing: var(--pane-tracking-caps);
+  text-transform: uppercase;
+  color: var(--pane-label-2);
+}
+.pane-secondary { color: var(--pane-label-2); }
+.pane-lede {
+  font-size: var(--pane-text-title-3);
+  line-height: 1.4;
+  color: var(--pane-label-2);
+  max-width: 40ch;
+  text-wrap: pretty;
+}
+.pane-link {
+  color: var(--pane-accent-text);
+  text-decoration: none;
+  border-radius: 2px;
+}
+.pane-link:hover { text-decoration: underline; text-underline-offset: 0.18em; }
+.pane-code {
+  font-family: var(--pane-font-mono);
+  font-size: 0.88em;
+  padding: 0.1em 0.35em;
+  border-radius: var(--pane-radius-xs);
+  background: var(--pane-fill);
+}
+
+/* Long-form reading: opaque, measured, never glass. */
+.pane-prose {
+  max-width: var(--pane-measure);
+  font-size: var(--pane-text-body);
+  line-height: var(--pane-leading-prose);
+  color: var(--pane-label);
+  text-wrap: pretty;
+}
+.pane-prose > * + * { margin-top: 1em; }
+.pane-prose h2 { font-size: var(--pane-text-title-2); line-height: var(--pane-leading-snug); letter-spacing: var(--pane-tracking-title); margin-top: 2em; font-weight: var(--pane-weight-semibold); }
+.pane-prose h3 { font-size: var(--pane-text-title-3); line-height: var(--pane-leading-snug); margin-top: 1.6em; font-weight: var(--pane-weight-semibold); }
+.pane-prose a { color: var(--pane-accent-text); text-decoration: underline; text-underline-offset: 0.18em; text-decoration-thickness: 1px; }
+.pane-prose blockquote { margin-inline: 0; padding-left: var(--pane-space-4); border-left: 3px solid var(--pane-separator); color: var(--pane-label-2); }
+.pane-prose--serif { font-family: var(--pane-font-serif); font-size: 1.125rem; }
+
+/* ---- Content-layer surfaces (opaque) ------------------------------------ */
+.pane-surface {
+  background: var(--pane-surface);
+  border-radius: var(--pane-radius-lg);
+  box-shadow: var(--pane-shadow-sm);
+}
+.pane-surface--outlined { box-shadow: none; border: 1px solid var(--pane-separator); }
+.pane-separator { height: 1px; border: 0; margin: 0; background: var(--pane-separator); }
+
+/* ==========================================================================
+   Glass material
+   One rule set; fallbacks in this order:
+   1. no backdrop-filter support         -> opaque
+   2. prefers-reduced-transparency       -> opaque (Chromium today)
+   3. prefers-contrast: more             -> opaque + strong rim
+   4. <html data-glass="off">            -> opaque (manual / site setting)
+   5. forced-colors (Windows High Contrast) -> system colors
+   ========================================================================== */
+.pane-glass {
+  position: relative;
+  isolation: isolate;
+  background: var(--pane-glass-opaque);          /* fallback first */
+  color: var(--pane-label);
+  border: 1px solid var(--pane-glass-rim);
+  box-shadow: inset 0 1px 0 var(--pane-glass-edge), var(--pane-shadow-float);
+}
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .pane-glass {
+    background: var(--pane-glass-tint);
+    -webkit-backdrop-filter: blur(var(--pane-glass-blur)) saturate(var(--pane-glass-saturate));
+    backdrop-filter: blur(var(--pane-glass-blur)) saturate(var(--pane-glass-saturate));
+  }
+  /* Clear variant: only over photos/video. A dimming layer keeps
+     white icons >= 3:1 even over a white frame. */
+  .pane-glass--clear {
+    --pane-focus: #ffffff;
+    background: var(--pane-glass-clear-tint);
+    color: #ffffff;
+    border-color: rgba(255, 255, 255, 0.28);
+    -webkit-backdrop-filter: blur(12px) saturate(150%);
+    backdrop-filter: blur(12px) saturate(150%);
+  }
+  .pane-glass--clear::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background: var(--pane-glass-clear-dim);
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .pane-glass, .pane-glass--clear {
+    --pane-focus: var(--pane-accent);
+    background: var(--pane-glass-opaque);
+    color: var(--pane-label);
+    border-color: var(--pane-glass-rim);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .pane-glass--clear::before { display: none; }
+}
+@media (prefers-contrast: more) {
+  .pane-glass, .pane-glass--clear {
+    --pane-focus: var(--pane-accent);
+    background: var(--pane-glass-opaque);
+    color: var(--pane-label);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    border: 1.5px solid var(--pane-label);
+  }
+  .pane-glass--clear::before { display: none; }
+}
+:root[data-glass="off"] .pane-glass,
+:root[data-glass="off"] .pane-glass--clear {
+  --pane-focus: var(--pane-accent);
+  background: var(--pane-glass-opaque);
+  color: var(--pane-label);
+  border-color: var(--pane-glass-rim);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+:root[data-glass="off"] .pane-glass--clear::before { display: none; }
+@media (forced-colors: active) {
+  .pane-glass, .pane-glass--clear {
+    background: Canvas;
+    color: CanvasText;
+    border: 1px solid CanvasText;
+    forced-color-adjust: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* ---- Buttons ------------------------------------------------------------- */
+.pane-btn {
+  --_h: var(--pane-control-h);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--pane-space-2);
+  min-height: var(--_h);
+  min-width: var(--_h);
+  padding: 0 1.25em;
+  border: 0;
+  border-radius: var(--pane-radius-pill);
+  font: inherit;
+  font-size: var(--pane-text-body);
+  font-weight: var(--pane-weight-medium);
+  line-height: 1;
+  letter-spacing: var(--pane-tracking-body);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color var(--pane-duration) var(--pane-ease),
+    color var(--pane-duration) var(--pane-ease),
+    box-shadow var(--pane-duration) var(--pane-ease),
+    transform var(--pane-duration-fast) var(--pane-ease);
+}
+.pane-btn:active:not(:disabled, [aria-disabled="true"]) { transform: scale(var(--pane-press-scale)); }
+.pane-btn svg { width: 1.15em; height: 1.15em; flex: none; }
+
+.pane-btn--sm { --_h: var(--pane-control-h-sm); padding: 0 0.9em; font-size: var(--pane-text-subhead); }
+.pane-btn--lg { --_h: var(--pane-control-h-lg); padding: 0 1.6em; font-size: var(--pane-text-body); font-weight: var(--pane-weight-semibold); }
+.pane-btn--icon { padding: 0; }
+
+.pane-btn--filled { background: var(--pane-accent); color: var(--pane-on-accent); }
+.pane-btn--filled:hover { background: color-mix(in srgb, var(--pane-accent) 88%, #000); }
+.pane-btn--tinted { background: var(--pane-accent-tint); color: var(--pane-accent-text); }
+/* Tinted/danger hover adds a ring instead of darkening, so text contrast holds. */
+.pane-btn--tinted:hover, .pane-btn--danger:hover { box-shadow: inset 0 0 0 1px currentColor; }
+.pane-btn--gray { background: var(--pane-fill); color: var(--pane-label); }
+.pane-btn--gray:hover { background: var(--pane-fill-strong); }
+.pane-btn--plain { background: transparent; color: var(--pane-accent-text); padding-inline: 0.75em; }
+.pane-btn--plain:hover { background: var(--pane-accent-tint); }
+.pane-btn--danger { background: var(--pane-danger-tint); color: var(--pane-danger); }
+/* Glass button: floating controls only (over content), never inline. */
+/* Text color and border come from .pane-glass / .pane-glass--clear so the
+   opaque fallbacks also switch the label color. */
+.pane-btn.pane-glass { border-width: 1px; border-style: solid; }
+.pane-btn--glass:hover { filter: brightness(1.04); }
+
+.pane-btn:disabled,
+.pane-btn[aria-disabled="true"] {
+  cursor: not-allowed;
+  background: var(--pane-fill);
+  color: var(--pane-label-disabled);
+  box-shadow: none;
+}
+.pane-btn[aria-busy="true"] { cursor: progress; }
+.pane-spinner {
+  width: 1em; height: 1em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: pane-spin 0.8s linear infinite;
+}
+@keyframes pane-spin { to { transform: rotate(1turn); } }
+@media (prefers-reduced-motion: reduce) {
+  .pane-spinner { animation-duration: 2.4s; }
+}
+
+/* ---- Fields --------------------------------------------------------------- */
+.pane-field { display: flex; flex-direction: column; gap: var(--pane-space-2); min-width: 0; }
+.pane-label { font-size: var(--pane-text-subhead); font-weight: var(--pane-weight-medium); color: var(--pane-label); }
+.pane-hint { font-size: var(--pane-text-footnote); color: var(--pane-label-2); }
+.pane-error {
+  display: flex; align-items: center; gap: var(--pane-space-1);
+  font-size: var(--pane-text-footnote);
+  color: var(--pane-danger);
+}
+.pane-error svg { width: 1.1em; height: 1.1em; flex: none; }
+
+.pane-input,
+.pane-select,
+.pane-textarea {
+  width: 100%;
+  min-height: var(--pane-control-h);
+  padding: 0 var(--pane-space-4);
+  border: 1px solid var(--pane-control-border);
+  border-radius: var(--pane-radius-md);
+  background: var(--pane-surface);
+  color: var(--pane-label);
+  font: inherit;
+  font-size: var(--pane-text-body);   /* >= 16px prevents iOS zoom */
+  transition: border-color var(--pane-duration) var(--pane-ease), box-shadow var(--pane-duration) var(--pane-ease);
+}
+.pane-textarea { padding-block: var(--pane-space-3); min-height: 7.5rem; resize: vertical; line-height: var(--pane-leading-body); }
+.pane-input::placeholder, .pane-textarea::placeholder { color: var(--pane-label-2); opacity: 1; }
+.pane-input:hover, .pane-select:hover, .pane-textarea:hover { border-color: var(--pane-label-2); }
+.pane-input:focus-visible, .pane-select:focus-visible, .pane-textarea:focus-visible,
+.pane-input:focus, .pane-select:focus, .pane-textarea:focus {
+  outline: 2px solid var(--pane-focus);
+  outline-offset: 0;
+  border-color: var(--pane-focus);
+}
+.pane-input[aria-invalid="true"], .pane-select[aria-invalid="true"], .pane-textarea[aria-invalid="true"] {
+  border-color: var(--pane-danger);
+}
+.pane-input:disabled, .pane-select:disabled, .pane-textarea:disabled {
+  background: var(--pane-fill); color: var(--pane-label-disabled); border-color: transparent; cursor: not-allowed;
+}
+.pane-select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 2.75rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2386868b' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.9rem center;
+  background-size: 1.1rem;
+}
+
+/* Search: capsule with leading icon. */
+.pane-search { position: relative; display: flex; align-items: center; }
+.pane-search svg {
+  position: absolute; left: 0.9rem;
+  width: 1.1rem; height: 1.1rem;
+  color: var(--pane-label-2);
+  pointer-events: none;
+}
+.pane-search .pane-input {
+  padding-left: 2.6rem;
+  border-radius: var(--pane-radius-pill);
+  background: var(--pane-fill);
+  border-color: transparent;
+}
+.pane-search .pane-input:hover { border-color: transparent; background: var(--pane-fill-strong); }
+.pane-search .pane-input::-webkit-search-cancel-button { cursor: pointer; }
+
+/* Switch: native checkbox with role="switch". */
+.pane-switch {
+  display: inline-flex; align-items: center; gap: var(--pane-space-3);
+  min-height: var(--pane-control-h);
+  cursor: pointer;
+}
+.pane-switch input {
+  appearance: none; -webkit-appearance: none;
+  position: relative;
+  flex: none;
+  width: 51px; height: 31px;
+  margin: 0;
+  border-radius: var(--pane-radius-pill);
+  background: var(--pane-fill-strong);
+  cursor: pointer;
+  transition: background-color var(--pane-duration) var(--pane-ease);
+}
+.pane-switch input::after {
+  content: "";
+  position: absolute; top: 2px; left: 2px;
+  width: 27px; height: 27px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+  transition: transform var(--pane-duration) var(--pane-ease-spring), width var(--pane-duration-fast) var(--pane-ease);
+}
+.pane-switch input:checked { background: var(--pane-success); }
+.pane-switch input:checked::after { transform: translateX(20px); }
+/* Transient glass moment while pressed (HIG: sliders/toggles). */
+.pane-switch input:active::after { width: 33px; }
+.pane-switch input:checked:active::after { transform: translateX(14px); }
+.pane-switch input:disabled { opacity: 0.45; cursor: not-allowed; }
+@media (forced-colors: active) {
+  .pane-switch input { border: 1px solid CanvasText; }
+  .pane-switch input::after { background: CanvasText; }
+  .pane-switch input:checked { background: Highlight; }
+}
+
+/* ---- Navigation bar (glass, sticky) ------------------------------------- */
+.pane-nav {
+  position: sticky;
+  top: env(safe-area-inset-top, 0px);
+  z-index: var(--pane-z-nav);
+  border-width: 0 0 1px;
+  border-radius: 0;
+  box-shadow: none;
+  transition: box-shadow var(--pane-duration) var(--pane-ease);
+}
+.pane-nav[data-scrolled="true"] { box-shadow: 0 1px 0 var(--pane-glass-rim), 0 6px 20px rgba(0, 0, 0, 0.06); }
+.pane-nav__inner {
+  display: flex; align-items: center; gap: var(--pane-space-4);
+  min-height: 56px;
+}
+.pane-nav__brand {
+  display: inline-flex; align-items: center; gap: var(--pane-space-2);
+  font-weight: var(--pane-weight-semibold);
+  font-size: var(--pane-text-body);
+  color: inherit; text-decoration: none;
+  margin-right: auto;
+  border-radius: var(--pane-radius-xs);
+}
+.pane-nav__links { display: flex; align-items: center; gap: var(--pane-space-1); list-style: none; margin: 0; padding: 0; }
+.pane-nav__link {
+  display: inline-flex; align-items: center;
+  min-height: 36px;
+  padding: 0 var(--pane-space-3);
+  border-radius: var(--pane-radius-pill);
+  color: var(--pane-label);
+  font-size: var(--pane-text-subhead);
+  text-decoration: none;
+  transition: background-color var(--pane-duration) var(--pane-ease);
+}
+.pane-nav__link:hover { background: var(--pane-fill); }
+.pane-nav__link[aria-current="page"] { font-weight: var(--pane-weight-semibold); background: var(--pane-fill); }
+.pane-nav__menu-btn { display: none; }
+@media (max-width: 720px) {
+  .pane-nav__menu-btn { display: inline-flex; }
+  .pane-nav__links {
+    display: none;
+    position: absolute; left: 0; right: 0; top: 100%;
+    flex-direction: column; align-items: stretch; gap: 0;
+    padding: var(--pane-space-2) var(--pane-gutter-end) var(--pane-space-4) var(--pane-gutter);
+    background: var(--pane-glass-opaque);       /* menu text is long-ish: opaque */
+    border-bottom: 1px solid var(--pane-separator);
+    box-shadow: var(--pane-shadow-md);
+  }
+  .pane-nav[data-open="true"] .pane-nav__links { display: flex; }
+  .pane-nav__link { min-height: var(--pane-control-h); font-size: var(--pane-text-body); }
+}
+
+/* ---- Tabs (segmented control) ------------------------------------------- */
+.pane-tabs__list {
+  display: inline-flex;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--pane-radius-pill);
+  background: var(--pane-fill);
+}
+.pane-tabs__list::-webkit-scrollbar { display: none; }
+.pane-tab {
+  flex: none;
+  min-height: 34px;
+  padding: 0 var(--pane-space-4);
+  border: 0;
+  border-radius: var(--pane-radius-pill);          /* concentric: list radius - 3px padding */
+  background: transparent;
+  color: var(--pane-label);
+  font: inherit;
+  font-size: var(--pane-text-subhead);
+  font-weight: var(--pane-weight-medium);
+  cursor: pointer;
+  transition: background-color var(--pane-duration) var(--pane-ease), box-shadow var(--pane-duration) var(--pane-ease);
+}
+.pane-tab:hover:not([aria-selected="true"]) { background: var(--pane-fill); }
+.pane-tab[aria-selected="true"] {
+  background: var(--pane-surface);
+  box-shadow: var(--pane-shadow-sm);
+  font-weight: var(--pane-weight-semibold);
+}
+.pane-tab:focus-visible { outline-offset: -2px; }
+.pane-tabs__panel { padding-top: var(--pane-space-6); }
+.pane-tabs__panel:focus-visible { outline-offset: 4px; border-radius: var(--pane-radius-xs); }
+@media (forced-colors: active) {
+  .pane-tab[aria-selected="true"] { outline: 2px solid Highlight; }
+}
+
+/* ---- Segmented control (radio group; for settings, not for panels) ------ */
+.pane-segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  margin: 0;
+  border: 0;
+  border-radius: var(--pane-radius-pill);
+  background: var(--pane-fill);
+}
+.pane-segmented legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.pane-segmented label {
+  position: relative;
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 34px;
+  padding: 0 var(--pane-space-4);
+  border-radius: var(--pane-radius-pill);
+  font-size: var(--pane-text-subhead);
+  font-weight: var(--pane-weight-medium);
+  cursor: pointer;
+  transition: background-color var(--pane-duration) var(--pane-ease), box-shadow var(--pane-duration) var(--pane-ease);
+}
+.pane-segmented label svg { width: 1em; height: 1em; }
+.pane-segmented input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.pane-segmented label:has(input:checked) { background: var(--pane-surface); box-shadow: var(--pane-shadow-sm); font-weight: var(--pane-weight-semibold); }
+.pane-segmented label:has(input:focus-visible) { outline: 2px solid var(--pane-focus); outline-offset: -2px; }
+@media (forced-colors: active) {
+  .pane-segmented label:has(input:checked) { outline: 2px solid Highlight; }
+}
+
+/* ---- Dialog (native <dialog>) ------------------------------------------- */
+.pane-dialog {
+  width: min(440px, calc(100vw - 32px));
+  max-height: min(80vh, 640px);
+  padding: 0;
+  border: 0;
+  border-radius: var(--pane-radius-xl);
+  background: var(--pane-surface);      /* dialogs carry text: opaque surface */
+  color: var(--pane-label);
+  box-shadow: var(--pane-shadow-lg);
+  overflow: auto;
+}
+.pane-dialog::backdrop {
+  background: var(--pane-scrim);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+.pane-dialog__body { padding: var(--pane-space-8) var(--pane-space-6) var(--pane-space-6); display: flex; flex-direction: column; gap: var(--pane-space-3); }
+.pane-dialog__title { margin: 0; font-size: var(--pane-text-title-3); font-weight: var(--pane-weight-semibold); line-height: var(--pane-leading-snug); }
+.pane-dialog__text { margin: 0; color: var(--pane-label-2); }
+.pane-dialog__actions {
+  display: flex; flex-wrap: wrap; gap: var(--pane-space-2);
+  padding: 0 var(--pane-space-6) var(--pane-space-6);
+}
+.pane-dialog__actions > .pane-btn { flex: 1 1 0; }
+.pane-dialog__close { position: absolute; top: var(--pane-space-3); right: var(--pane-space-3); }
+
+.pane-dialog[open] { animation: pane-dialog-in var(--pane-duration-slow) var(--pane-ease-out); }
+.pane-dialog[open]::backdrop { animation: pane-fade-in var(--pane-duration-slow) var(--pane-ease-out); }
+@keyframes pane-dialog-in { from { opacity: 0; transform: translateY(8px) scale(0.97); } }
+@keyframes pane-fade-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .pane-dialog[open] { animation-name: pane-fade-in; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .pane-dialog::backdrop { -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+
+/* ---- Floating glass toolbar --------------------------------------------- */
+.pane-toolbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 5px;
+  border-radius: var(--pane-radius-pill);
+}
+.pane-toolbar--floating {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--pane-space-6) + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: var(--pane-z-float);
+  max-width: calc(100vw - 32px);
+}
+.pane-toolbar__btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;                      /* concentric with the 5px toolbar inset */
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: background-color var(--pane-duration) var(--pane-ease), transform var(--pane-duration-fast) var(--pane-ease);
+}
+.pane-toolbar__btn:hover { background: var(--pane-fill); }
+.pane-toolbar__btn:active { transform: scale(0.92); }
+.pane-toolbar__btn[aria-pressed="true"] { background: var(--pane-fill-strong); color: var(--pane-accent-text); }
+.pane-glass--clear .pane-toolbar__btn:hover { background: rgba(255, 255, 255, 0.18); }
+.pane-glass--clear .pane-toolbar__btn[aria-pressed="true"] { background: rgba(255, 255, 255, 0.3); color: inherit; }
+.pane-toolbar__btn svg { width: 20px; height: 20px; }
+.pane-toolbar__btn:focus-visible { outline-offset: -2px; }
+.pane-toolbar__sep { width: 1px; height: 22px; margin: 0 4px; background: var(--pane-separator); flex: none; }
+.pane-glass--clear .pane-toolbar__sep { background: rgba(255, 255, 255, 0.35); }
+@media (prefers-reduced-motion: reduce) {
+  .pane-toolbar__btn:active { transform: none; }
+}
+
+/* ---- Badges --------------------------------------------------------------- */
+.pane-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 10px;
+  border-radius: var(--pane-radius-pill);
+  font-size: var(--pane-text-footnote);
+  font-weight: var(--pane-weight-medium);
+  background: var(--pane-fill);
+  color: var(--pane-label);
+}
+.pane-badge--accent { background: var(--pane-accent-tint); color: var(--pane-accent-text); }

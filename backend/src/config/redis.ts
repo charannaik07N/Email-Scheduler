@@ -1,58 +1,58 @@
-import Redis from 'ioredis';
+import Redis, { RedisOptions } from 'ioredis';
 import { logger } from '../utils/logger';
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
-// Create Redis connection
-export const redis = new Redis(REDIS_URL, {
-  maxRetriesPerRequest: null, // Required for BullMQ
-  retryStrategy: (times: number) => {
-    const delay = Math.min(times * 50, 2000);
-    return delay;
-  },
-  reconnectOnError: (err) => {
-    const targetError = 'READONLY';
-    if (err.message.includes(targetError)) {
-      // Only reconnect when the error contains "READONLY"
-      return true;
-    }
-    return false;
-  },
-});
+const baseOptions: RedisOptions = {
+  retryStrategy: (times: number) => Math.min(times * 50, 2000),
+  reconnectOnError: (err) => err.message.includes('READONLY'),
+};
 
-// Connection events
-redis.on('connect', () => {
-  logger.info('✅ Redis connected successfully');
-});
+const attachLogging = (client: Redis, label: string) => {
+  client.on('connect', () => logger.info(`✅ Redis (${label}) connected`));
+  client.on('error', (error) => logger.error(`❌ Redis (${label}) error:`, error.message));
+};
 
-redis.on('error', (error) => {
-  logger.error('❌ Redis connection error:', error);
-});
+/**
+ * Connection for BullMQ. BullMQ requires maxRetriesPerRequest: null, which makes
+ * commands wait indefinitely while Redis is down — so don't use it for anything
+ * a request handler awaits.
+ */
+export const redis = new Redis(REDIS_URL, { ...baseOptions, maxRetriesPerRequest: null });
+attachLogging(redis, 'queue');
 
-redis.on('close', () => {
-  logger.warn('⚠️  Redis connection closed');
+/** Connection for plain commands (rate limits, locks, health): fails fast when Redis is down. */
+export const redisCommands = new Redis(REDIS_URL, {
+  ...baseOptions,
+  maxRetriesPerRequest: 1,
+  connectTimeout: 5000,
 });
+attachLogging(redisCommands, 'commands');
 
-// Test Redis connection
+const withTimeout = <T>(promise: Promise<T>, ms: number, message: string): Promise<T> =>
+  new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+
 export const testRedisConnection = async (): Promise<void> => {
-  try {
-    await redis.ping();
-    logger.info('✅ Redis ping successful');
-  } catch (error) {
-    logger.error('❌ Redis ping failed:', error);
-    throw error;
-  }
+  await withTimeout(redisCommands.ping(), 5000, 'Redis ping timed out');
+  logger.info('✅ Redis ping successful');
 };
 
-// Graceful shutdown
 export const disconnectRedis = async (): Promise<void> => {
-  try {
-    await redis.quit();
-    logger.info('✅ Redis disconnected successfully');
-  } catch (error) {
-    logger.error('❌ Redis disconnection failed:', error);
-    throw error;
-  }
+  await Promise.allSettled([redis.quit(), redisCommands.quit()]);
+  logger.info('✅ Redis disconnected');
 };
 
+export { withTimeout };
 export default redis;

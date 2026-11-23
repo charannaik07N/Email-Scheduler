@@ -8,14 +8,15 @@ This guide will help you set up and run the Email Scheduler application step-by-
 
 Before starting, make sure you have:
 
-- ✅ Node.js 18+ installed
+- ✅ Node.js 20+ installed
 - ✅ Redis installed (or cloud Redis URL)
 - ✅ Supabase account
+- ✅ Google Cloud project with an OAuth Client ID (sign-in is Google only)
 - ✅ SMTP credentials (Ethereal Email for testing)
 
 ---
 
-## ⚡ Quick Start (5 Minutes)
+## ⚡ Quick Start
 
 ### Step 1: Install Dependencies
 
@@ -32,151 +33,90 @@ cd ../frontend
 npm install
 ```
 
-### Step 2: Setup Supabase Database
+### Step 2: Create a Google OAuth Client ID
 
-1. **Go to Supabase Dashboard**: https://supabase.com/dashboard
-2. **Select your project**: `jaarbpqxaitkdsyeleuw`
-3. **Open SQL Editor**
-4. **Run this SQL**:
+1. Go to https://console.cloud.google.com/ → **APIs & Services → Credentials**
+2. **Create Credentials → OAuth Client ID**, type **Web application**
+3. Add `http://localhost:5173` to **Authorized JavaScript origins**
+4. Copy the Client ID; it goes in both `.env` files below
 
-```sql
--- Create users table
-CREATE TABLE IF NOT EXISTS users (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  email TEXT UNIQUE NOT NULL,
-  name TEXT,
-  google_id TEXT UNIQUE,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Create senders table
-CREATE TABLE IF NOT EXISTS senders (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  email TEXT NOT NULL,
-  smtp_host TEXT,
-  smtp_port INTEGER,
-  smtp_user TEXT,
-  smtp_pass TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Create emails table
-CREATE TABLE IF NOT EXISTS emails (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  sender_id UUID REFERENCES senders(id) ON DELETE CASCADE,
-  recipient_email TEXT NOT NULL,
-  recipient_name TEXT,
-  subject TEXT NOT NULL,
-  body TEXT NOT NULL,
-  html_body TEXT,
-  scheduled_at TIMESTAMPTZ NOT NULL,
-  sent_at TIMESTAMPTZ,
-  status TEXT NOT NULL DEFAULT 'SCHEDULED',
-  attempt_count INTEGER DEFAULT 0,
-  error_message TEXT,
-  idempotency_key TEXT UNIQUE,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Create email_logs table
-CREATE TABLE IF NOT EXISTS email_logs (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  email_id UUID REFERENCES emails(id) ON DELETE CASCADE,
-  status TEXT NOT NULL,
-  message TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Create indexes for performance
-CREATE INDEX IF NOT EXISTS idx_emails_sender_id ON emails(sender_id);
-CREATE INDEX IF NOT EXISTS idx_emails_status ON emails(status);
-CREATE INDEX IF NOT EXISTS idx_emails_scheduled_at ON emails(scheduled_at);
-CREATE INDEX IF NOT EXISTS idx_senders_user_id ON senders(user_id);
-```
-
-### Step 3: Create Test User & Sender
-
-**Still in Supabase SQL Editor, run:**
-
-```sql
--- Insert a test user
-INSERT INTO users (email, name)
-VALUES ('test@example.com', 'Test User')
-RETURNING id;
-
--- Copy the returned ID and use it below
--- Replace 'YOUR_USER_ID_HERE' with the actual ID from above
-INSERT INTO senders (user_id, name, email, smtp_host, smtp_port, smtp_user, smtp_pass)
-VALUES (
-  'YOUR_USER_ID_HERE',
-  'Test Sender',
-  'test@example.com',
-  'smtp.ethereal.email',
-  587,
-  'your-ethereal-username',
-  'your-ethereal-password'
-);
-```
-
-**Get Ethereal Email credentials**:
+### Step 3: Get Ethereal Email Credentials
 
 1. Go to https://ethereal.email/create
 2. Click "Create Ethereal Account"
 3. Copy the username and password
-4. Replace them in the SQL above
+
+Ethereal catches emails instead of delivering them; view them at https://ethereal.email/messages.
 
 ### Step 4: Configure Environment Variables
 
 #### Backend (.env file)
 
-Create `backend/.env`:
+```bash
+cd backend
+cp .env.example .env
+```
+
+Edit `backend/.env`:
 
 ```env
 # Server Configuration
 PORT=5000
 NODE_ENV=development
+LOG_LEVEL=info
 
-# JWT Secret (use this exact value for testing)
-JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
+# Required. Signs login tokens; the server refuses to start without it.
+# Generate one with: openssl rand -hex 32
+JWT_SECRET=
 
-# Supabase Configuration
-SUPABASE_URL=https://jaarbpqxaitkdsyeleuw.supabase.co
-SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImphYXJicHF4YWl0a2RzeWVsZXV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2NzQzMDcsImV4cCI6MjA4NTI1MDMwN30.VT_TBg55QGd-L90MQxv13pXYLc6NJAc7J-UGI3yJAyQ
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImphYXJicHF4YWl0a2RzeWVsZXV3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2OTY3NDMwNywiZXhwIjoyMDg1MjUwMzA3fQ.your-service-role-key
+# Required. Same value as the frontend's VITE_GOOGLE_CLIENT_ID
+GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+
+# Supabase Configuration (Settings → API)
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+
+# Only used by the Prisma CLI (Settings → Database → connection string)
+DATABASE_URL=postgresql://postgres:password@db.your-project.supabase.co:5432/postgres
 
 # Redis Configuration (local)
-REDIS_HOST=localhost
-REDIS_PORT=6379
+REDIS_URL=redis://localhost:6379
 
-# SMTP Configuration (use Ethereal Email for testing)
+# SMTP Configuration (Ethereal Email for testing)
 SMTP_HOST=smtp.ethereal.email
 SMTP_PORT=587
-SMTP_USER=your-ethereal-username@ethereal.email
-SMTP_PASS=your-ethereal-password
-SMTP_FROM_NAME=Email Scheduler
-SMTP_FROM_EMAIL=noreply@emailscheduler.com
+ETHEREAL_USER=your-ethereal-username@ethereal.email
+ETHEREAL_PASS=your-ethereal-password
 ```
 
-**Note**: Replace Ethereal credentials with your actual ones from step 3.
+Optional settings (defaults shown in `backend/.env.example`): `RUN_WORKER`, `WORKER_CONCURRENCY`, `MIN_DELAY_BETWEEN_EMAILS_MS`, `MAX_EMAILS_PER_HOUR_PER_SENDER`, `CORS_ORIGIN`, `API_RATE_LIMIT_PER_15_MIN`, `TRUST_PROXY`.
 
 #### Frontend (.env file)
 
 Create `frontend/.env`:
 
 ```env
-# API Base URL
+# API Base URL (including /api)
 VITE_API_BASE_URL=http://localhost:5000/api
 
-# Google OAuth (optional)
-VITE_GOOGLE_CLIENT_ID=your-google-client-id
+# Google OAuth Client ID (same as the backend's GOOGLE_CLIENT_ID)
+VITE_GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
 ```
 
-### Step 5: Start Redis
+### Step 5: Setup Supabase Database
+
+Create the tables (`users`, `senders`, `emails`, `email_logs`) from `backend/prisma/schema.prisma`:
+
+```bash
+cd backend
+npm run prisma:push
+```
+
+This needs `DATABASE_URL`. On an existing database, compare it with the schema before pushing.
+
+You don't need to create users or senders by hand: signing in with Google creates your user and a default sender with your Google email.
+
+### Step 6: Start Redis
 
 **Windows (using Memurai):**
 
@@ -186,6 +126,8 @@ VITE_GOOGLE_CLIENT_ID=your-google-client-id
 # Or start Redis from command line:
 redis-server
 ```
+
+**macOS:** `brew services start redis`
 
 **Verify Redis is running:**
 
@@ -204,7 +146,7 @@ redis-cli ping
   REDIS_URL=redis://default:your-password@your-redis-url.upstash.io:6379
   ```
 
-### Step 6: Start the Application
+### Step 7: Start the Application
 
 **Terminal 1 - Backend:**
 
@@ -216,11 +158,16 @@ npm run dev
 **Expected output:**
 
 ```
-🚀 Server running on port 5000
-✅ Connected to Supabase
-✅ Redis connected
-✅ Email worker started
+🚀 Starting Email Scheduler Server...
+✅ Redis ping successful
+🚀 Email worker started (concurrency 5)
+✅ Server is running on port 5000 (worker on)
+✅ SMTP connection verified successfully
 ```
+
+If it exits with `Missing required environment variable JWT_SECRET` (or `GOOGLE_CLIENT_ID`, or a Supabase error), fill in that value in `backend/.env`.
+
+To run the worker as a separate process, set `RUN_WORKER=false` and run `npm run worker` in another terminal.
 
 **Terminal 2 - Frontend:**
 
@@ -232,69 +179,17 @@ npm run dev
 **Expected output:**
 
 ```
-  VITE v5.x.x  ready in xxx ms
+  VITE v7.x.x  ready in xxx ms
 
   ➜  Local:   http://localhost:5173/
   ➜  Network: use --host to expose
 ```
 
-### Step 7: Login to the Application
+### Step 8: Sign In
 
-**Option A: Generate JWT Token (Easiest)**
-
-1. **Create a Node.js script** `generate-token.js`:
-
-```javascript
-const jwt = require("jsonwebtoken");
-
-// Get your user ID from Supabase (Step 3)
-const userId = "YOUR_USER_ID_HERE"; // Replace with actual UUID
-const email = "test@example.com";
-
-const token = jwt.sign(
-  { userId, email },
-  "your-super-secret-jwt-key-change-this-in-production",
-  { expiresIn: "7d" },
-);
-
-console.log("\n=== JWT Token ===");
-console.log(token);
-console.log("\n=== User Data ===");
-console.log(JSON.stringify({ id: userId, email, name: "Test User" }));
-```
-
-2. **Run it:**
-
-```bash
-node generate-token.js
-```
-
-3. **Open browser** → Go to `http://localhost:5173`
-4. **Open DevTools** (F12) → Console tab
-5. **Paste this** (replace with your token and user data):
-
-```javascript
-localStorage.setItem("authToken", "YOUR_JWT_TOKEN_HERE");
-localStorage.setItem(
-  "user",
-  '{"id":"YOUR_USER_ID","email":"test@example.com","name":"Test User"}',
-);
-window.location.reload();
-```
-
-**Option B: Use Online JWT Generator**
-
-1. Go to https://jwt.io/
-2. **Payload**:
-   ```json
-   {
-     "userId": "YOUR_USER_ID_HERE",
-     "email": "test@example.com"
-   }
-   ```
-3. **Secret**: `your-super-secret-jwt-key-change-this-in-production`
-4. Copy the token
-5. Use step 5 from Option A to set localStorage
+1. Open `http://localhost:5173`
+2. Click **"Sign in with Google"**
+3. You land on the Dashboard
 
 ---
 
@@ -305,24 +200,19 @@ window.location.reload();
 1. Open browser DevTools (F12) → Network tab
 2. Click "Compose" button
 3. Check for `/api/emails/senders` request
-4. Should return 200 OK with your senders
-
-**If you get 500 error:**
-
-- Check backend terminal for error logs
-- Verify user ID in JWT token matches user in database
-- Check Supabase connection
+4. Should return 200 OK with your default sender
 
 ### Test 2: Send a Test Email
 
 1. **Click "Compose"**
 2. **From**: Select your sender
-3. **To**: Enter `recipient@test.com`
+3. **To**: Enter `recipient@test.com` (or upload a CSV/TXT list)
 4. **Subject**: "Test Email"
 5. **Body**: "Hello, this is a test!"
-6. **Click "Send Later"**
-7. **Pick tomorrow 11 AM**
-8. **Click "Schedule"**
+6. Optionally set **Delay between 2 emails (seconds)** and **Hourly Limit**; with several recipients these space out the send times
+7. **Click "Send Later"**
+8. **Pick a time** (or "Tomorrow, 11:00 AM")
+9. **Click "Schedule"**
 
 **Expected:**
 
@@ -330,71 +220,53 @@ window.location.reload();
 - Compose window closes
 - Email appears in "Scheduled" tab
 
-### Test 3: View Scheduled Email
+### Test 3: View, Cancel, and Retry
 
-1. Go to **Scheduled** tab
-2. You should see your email listed
-3. Click on it to view details
-4. Hover over email to see cancel button
+1. Go to the **Scheduled** tab
+2. Click your email to view details and its log
+3. **Cancel email** removes a scheduled email (it is deleted)
+4. A failed email in the **Sent** tab shows **Retry now**
 
 ---
 
 ## 🔧 Troubleshooting
 
+### Problem: Backend exits on startup
+
+- `Missing required environment variable ...`: set `JWT_SECRET` and `GOOGLE_CLIENT_ID` in `backend/.env`
+- `Missing Supabase configuration`: set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`
+
+### Problem: Google sign-in fails
+
+- `VITE_GOOGLE_CLIENT_ID` (frontend) and `GOOGLE_CLIENT_ID` (backend) must be the same Client ID
+- `http://localhost:5173` must be an authorized JavaScript origin for that Client ID
+- Check the backend terminal for "Rejected Google token"
+
 ### Problem: "500 Internal Server Error" on `/api/emails/senders`
 
-**Solutions:**
-
 1. **Check backend logs** - Look for error messages in the terminal
-2. **Verify JWT token**:
-   ```javascript
-   // In browser console
-   console.log(localStorage.getItem("authToken"));
-   ```
-3. **Check user exists in database**:
-   ```sql
-   -- In Supabase SQL Editor
-   SELECT * FROM users WHERE email = 'test@example.com';
-   ```
-4. **Verify sender exists**:
-   ```sql
-   SELECT * FROM senders WHERE user_id = 'YOUR_USER_ID';
-   ```
+2. **Check the tables exist** - run `npm run prisma:push` (see Step 5)
+3. **Check Supabase connection** - verify `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`
 
-### Problem: "No sender available"
+### Problem: Can't create a sender
 
-**Solution:**
-
-```sql
--- Run this in Supabase to add a sender
-INSERT INTO senders (user_id, name, email, smtp_host, smtp_port, smtp_user, smtp_pass)
-VALUES (
-  'YOUR_USER_ID',
-  'My Sender',
-  'sender@example.com',
-  'smtp.ethereal.email',
-  587,
-  'ethereal-username',
-  'ethereal-password'
-);
-```
+Without its own SMTP settings, a sender's email must be your account (Google) email. To send from another address, give the sender its own `smtpHost`, `smtpUser`, and `smtpPass` (see `backend/API_DOCS.md`).
 
 ### Problem: Redis connection error
 
 **Solutions:**
 
 - Make sure Redis is running: `redis-cli ping`
-- Check Redis port: default is 6379
-- For cloud Redis, verify `REDIS_URL` in `.env`
+- Check `REDIS_URL` in `backend/.env` (default `redis://localhost:6379`)
 
 ### Problem: Emails not sending
 
 **Check:**
 
-1. **Backend worker is running** - Look for "✅ Email worker started" in terminal
-2. **SMTP credentials are correct** - Check Ethereal Email dashboard
-3. **Schedule time is in the future**
-4. **Check email_logs table** in Supabase for error messages
+1. **A worker is running** - Look for "Email worker started" in the backend (or worker) terminal. With `RUN_WORKER=false` you must run `npm run worker` separately.
+2. **SMTP credentials are correct** - Check `ETHEREAL_USER` / `ETHEREAL_PASS`
+3. **Hourly limit** - Emails over `MAX_EMAILS_PER_HOUR_PER_SENDER` show `RETRYING` and wait for the next hour
+4. **Check the email's log** in the detail view, or the `email_logs` table in Supabase
 
 ### Problem: Frontend can't connect to backend
 
@@ -402,7 +274,7 @@ VALUES (
 
 - Verify backend is running on port 5000
 - Check `VITE_API_BASE_URL` in `frontend/.env`
-- Check CORS settings in backend (should allow `http://localhost:5173`)
+- Check `CORS_ORIGIN` in `backend/.env` (should include `http://localhost:5173`)
 
 ---
 
@@ -410,20 +282,17 @@ VALUES (
 
 ### Backend Health Check
 
-**Terminal:**
-
 ```bash
-curl http://localhost:5000/api/health
+curl http://localhost:5000/health
 ```
 
-**Expected**: Server response (may need to add health endpoint)
+**Expected**: `{"status":"healthy",...}`
 
 ### Database Check
 
 **Supabase SQL Editor:**
 
 ```sql
--- Check all data
 SELECT * FROM users;
 SELECT * FROM senders;
 SELECT * FROM emails ORDER BY created_at DESC LIMIT 10;
@@ -431,8 +300,6 @@ SELECT * FROM email_logs ORDER BY created_at DESC LIMIT 10;
 ```
 
 ### Redis Check
-
-**Terminal:**
 
 ```bash
 redis-cli
@@ -444,9 +311,9 @@ redis-cli
 
 ## 🎯 Complete Workflow Test
 
-1. ✅ Start backend → See connection messages
+1. ✅ Start backend → See startup messages
 2. ✅ Start frontend → Open in browser
-3. ✅ Login → Set JWT token in localStorage
+3. ✅ Sign in with Google
 4. ✅ Click Compose → No errors
 5. ✅ See sender in dropdown
 6. ✅ Add recipient
@@ -463,9 +330,14 @@ redis-cli
 ```bash
 # Backend
 cd backend
-npm run dev          # Start development server
+npm run dev          # Start development server (API + worker)
+npm run worker       # Start a standalone worker (use with RUN_WORKER=false)
 npm run build        # Build for production
+npm run typecheck    # Type-check without building
 npm start            # Start production server
+npm run start:worker # Start production standalone worker
+npm run prisma:push  # Create/update database tables
+npm run prisma:studio # Browse the database
 
 # Frontend
 cd frontend
@@ -477,9 +349,6 @@ npm run preview      # Preview production build
 redis-cli ping       # Check if Redis is running
 redis-cli            # Open Redis CLI
 redis-cli FLUSHALL   # Clear all Redis data (use carefully!)
-
-# Database
-# Use Supabase dashboard SQL Editor for queries
 ```
 
 ---
@@ -489,7 +358,6 @@ redis-cli FLUSHALL   # Clear all Redis data (use carefully!)
 Add to `backend/.env`:
 
 ```env
-DEBUG=*
 LOG_LEVEL=debug
 ```
 
@@ -505,7 +373,7 @@ This will show detailed logs in the backend terminal.
 4. **Verify all environment variables** are set correctly
 5. **Make sure all services are running**:
    - ✅ Redis
-   - ✅ Backend on port 5000
+   - ✅ Backend on port 5000 (and the worker)
    - ✅ Frontend on port 5173
 
 ---

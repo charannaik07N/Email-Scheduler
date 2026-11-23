@@ -1,391 +1,810 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import type { KeyboardEvent, ReactNode, RefObject } from 'react';
+import {
+  CalendarClock,
+  ChevronLeft,
+  Clock,
+  LogOut,
+  Mail,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  Send,
+  SquarePen,
+  Sun,
+  Trash2,
+  TriangleAlert,
+} from 'lucide-react';
 import { ComposeEmail } from './ComposeEmail';
 import { useAuth } from '../auth';
 import { emailService } from '../services/email.service';
-import type { ScheduledEmail, SentEmail, EmailStats } from '../types';
+import type { Email, EmailStats, PaginatedResponse, ApiResponse } from '../types';
+import { Avatar, Notice, SkipLink, StatusBadge, TopBar } from '../ui';
+import { dayLabel, groupByDay, timeLabel } from '../utils/timeline';
 
-type Tab = 'scheduled' | 'sent';
-type ViewMode = 'list' | 'compose' | 'detail';
+type Folder = 'scheduled' | 'sent' | 'failed';
 
-// Format time for display like "Tue 8:15:12 AM"
-const formatScheduleTime = (dateString: string) => {
-  const date = new Date(dateString);
-  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const day = days[date.getDay()];
-  const time = date.toLocaleTimeString('en-US', { 
-    hour: 'numeric', 
-    minute: '2-digit', 
-    second: '2-digit',
-    hour12: true 
+interface ListState {
+  emails: Email[];
+  page: number;
+  totalPages: number;
+}
+
+const EMPTY_LIST: ListState = { emails: [], page: 1, totalPages: 1 };
+const EMPTY_LISTS: Record<Folder, ListState> = { scheduled: EMPTY_LIST, sent: EMPTY_LIST, failed: EMPTY_LIST };
+
+// How often the dashboard refreshes itself, so sent emails move folders without a manual refresh.
+const POLL_INTERVAL_MS = 30_000;
+
+// Below this width the list and the detail share one column (matches app.css).
+const SPLIT_QUERY = '(max-width: 1079px)';
+
+const FOLDERS: {
+  id: Folder;
+  label: string;
+  Icon: typeof Clock;
+  load: (page: number, signal?: AbortSignal) => Promise<ApiResponse<PaginatedResponse<Email>>>;
+  count: (stats: EmailStats) => number;
+  empty: { title: string; text: string };
+}[] = [
+  {
+    id: 'scheduled',
+    label: 'Scheduled',
+    Icon: Clock,
+    load: emailService.getScheduledEmails,
+    count: (s) => s.totalScheduled,
+    empty: { title: 'Nothing scheduled', text: 'Emails you schedule wait here until they go out.' },
+  },
+  {
+    id: 'sent',
+    label: 'Sent',
+    Icon: Send,
+    load: emailService.getSentEmails,
+    count: (s) => s.totalSent,
+    empty: { title: 'No sent emails yet', text: 'Delivered emails appear here.' },
+  },
+  {
+    id: 'failed',
+    label: 'Failed',
+    Icon: TriangleAlert,
+    load: emailService.getFailedEmails,
+    count: (s) => s.totalFailed,
+    empty: { title: 'No failed emails', text: "Emails that couldn't be delivered appear here, ready to retry." },
+  },
+];
+
+const startOfDay = (date: Date, addDays = 0) =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate() + addDays).getTime();
+
+/** Whole days from today: 0 today, 1 tomorrow, -1 yesterday. */
+const dayOffset = (date: Date) => Math.round((startOfDay(date) - startOfDay(new Date())) / 86_400_000);
+
+const timeOf = (date: Date) => date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+
+const dateOf = (date: Date, withYear: boolean) =>
+  date.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: withYear || date.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined,
   });
-  return `${day} ${time}`;
+
+const parseDate = (value: string | null | undefined) => {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 };
 
-// Format date for detail view like "Nov 3, 10:23 AM"
-const formatDetailDate = (dateString: string) => {
-  const date = new Date(dateString);
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const month = months[date.getMonth()];
-  const day = date.getDate();
-  const time = date.toLocaleTimeString('en-US', { 
-    hour: 'numeric', 
-    minute: '2-digit',
-    hour12: true 
-  });
-  return `${month} ${day}, ${time}`;
+/** "Today, 9:41 AM", "Tomorrow, 11:00 AM", "Yesterday, …" or "Nov 23, 3:00 PM". */
+const formatWhen = (value: string | null | undefined, withYear = false) => {
+  const date = parseDate(value);
+  if (!date) return '';
+  const days = dayOffset(date);
+  const day =
+    days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : days === -1 ? 'Yesterday' : dateOf(date, withYear);
+  return `${day}, ${timeOf(date)}`;
+};
+
+/**
+ * Short form for list rows, like Mail: "9:41 AM" today, otherwise the day.
+ * Upcoming emails keep their time, since when they go out is the point.
+ */
+const formatShort = (value: string | null | undefined, upcoming: boolean) => {
+  const date = parseDate(value);
+  if (!date) return '';
+  const days = dayOffset(date);
+  if (days === 0) return timeOf(date);
+  const day = days === 1 ? 'Tomorrow' : days === -1 ? 'Yesterday' : dateOf(date, false);
+  return upcoming ? `${day} ${timeOf(date)}` : day;
+};
+
+const whenOf = (email: Email) => (email.status === 'SENT' ? email.sentAt || email.scheduledAt : email.scheduledAt);
+
+const toListState = (response: ApiResponse<PaginatedResponse<Email>>, previous?: ListState): ListState | null => {
+  if (!response.success || !response.data) return null;
+  const { data, page, totalPages } = response.data;
+  return {
+    // Appending a page can repeat a row that moved between pages; keep the first copy.
+    emails: previous
+      ? [...previous.emails, ...data.filter((email) => !previous.emails.some((e) => e.id === email.id))]
+      : data,
+    page,
+    totalPages,
+  };
 };
 
 export const Dashboard = () => {
   const { user, logout } = useAuth();
-  const [activeTab, setActiveTab] = useState<Tab>('scheduled');
-  const [viewMode, setViewMode] = useState<ViewMode>('list');
-  const [selectedEmail, setSelectedEmail] = useState<ScheduledEmail | SentEmail | null>(null);
-  const [scheduledEmails, setScheduledEmails] = useState<ScheduledEmail[]>([]);
-  const [sentEmails, setSentEmails] = useState<SentEmail[]>([]);
+  const [folder, setFolder] = useState<Folder>('scheduled');
+  const [isComposing, setIsComposing] = useState(false);
+  const [selected, setSelected] = useState<Email | null>(null);
+  const [lists, setLists] = useState<Record<Folder, ListState>>(EMPTY_LISTS);
   const [stats, setStats] = useState<EmailStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [actionError, setActionError] = useState('');
+  const [isActing, setIsActing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  // Moves the timeline's "now" line. Local only, no requests.
+  const [now, setNow] = useState(() => Date.now());
+  const fetchController = useRef<AbortController | null>(null);
+  // Folders showing more than page 1. Refreshes only reload page 1, so they
+  // leave these folders alone (stats and the other folders still update).
+  const extraPages = useRef(new Set<Folder>());
+  const cancelDialog = useRef<HTMLDialogElement>(null);
+  const detailHeading = useRef<HTMLHeadingElement>(null);
+  const rowRefs = useRef(new Map<string, HTMLButtonElement>());
+  // The list is one Tab stop: this row (or the selected one, or the first) takes it.
+  const [activeRowId, setActiveRowId] = useState<string | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  // Refreshing and moving the "now" line wait while focus is in the list, so
+  // nothing shifts under someone reading or moving through it.
+  const focusInList = () => Boolean(listRef.current?.contains(document.activeElement));
 
-  useEffect(() => {
-    fetchData();
+  /**
+   * Reload the stats and the first page of every folder, except folders with
+   * extra pages loaded. A newer call cancels an older one. Callers that want
+   * the spinner set isLoading themselves.
+   */
+  const fetchData = useCallback(() => {
+    fetchController.current?.abort();
+    const controller = new AbortController();
+    fetchController.current = controller;
+
+    return Promise.all([
+      Promise.all(FOLDERS.map((f) => f.load(1, controller.signal))),
+      emailService.getEmailStats(controller.signal),
+    ]).then(([folderResults, statsRes]) => {
+      if (controller.signal.aborted) return;
+      setLists((prev) => {
+        const next = { ...prev };
+        FOLDERS.forEach((f, i) => {
+          // Checked when the results arrive, so a refresh that was already
+          // running when "Load more" was clicked can't wipe the loaded pages.
+          if (extraPages.current.has(f.id)) return;
+          const list = toListState(folderResults[i]);
+          if (list) next[f.id] = list;
+        });
+        return next;
+      });
+      if (statsRes.success && statsRes.data) setStats(statsRes.data);
+      const failed = [...folderResults, statsRes].find((res) => !res.success);
+      setError(failed ? failed.error || 'Failed to load emails' : '');
+      setIsLoading(false);
+    });
   }, []);
 
-  const fetchData = async () => {
+  // isLoading starts true, so the first load shows the spinner.
+  useEffect(() => {
+    fetchData();
+    return () => fetchController.current?.abort();
+  }, [fetchData]);
+
+  // Refresh in the background while the mailbox is on screen. Hidden tabs
+  // don't poll (each refresh is 4 requests, which count toward the API's rate
+  // limit); a tab that becomes visible again refreshes right away.
+  useEffect(() => {
+    if (isComposing) return;
+    let timer: number | undefined;
+    const start = () => {
+      if (timer === undefined) {
+        timer = window.setInterval(() => {
+          if (!focusInList()) fetchData();
+        }, POLL_INTERVAL_MS);
+      }
+    };
+    const stop = () => {
+      window.clearInterval(timer);
+      timer = undefined;
+    };
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        stop();
+      } else {
+        fetchData();
+        start();
+      }
+    };
+    if (!document.hidden) start();
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      stop();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [isComposing, fetchData]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (!focusInList()) setNow(Date.now());
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const reload = () => {
+    extraPages.current.clear();
     setIsLoading(true);
-    try {
-      const [scheduledRes, sentRes, statsRes] = await Promise.all([
-        emailService.getScheduledEmails(),
-        emailService.getSentEmails(),
-        emailService.getEmailStats()
-      ]);
-
-      if (scheduledRes.success && scheduledRes.data) {
-        setScheduledEmails(scheduledRes.data.data);
-      }
-      if (sentRes.success && sentRes.data) {
-        setSentEmails(sentRes.data.data);
-      }
-      if (statsRes.success && statsRes.data) {
-        setStats(statsRes.data);
-      }
-    } catch (error) {
-      console.error('Failed to fetch data:', error);
-    }
-    setIsLoading(false);
-  };
-
-  const handleRefresh = () => {
     fetchData();
   };
 
-  const handleEmailClick = (email: ScheduledEmail | SentEmail) => {
-    setSelectedEmail(email);
-    setViewMode('detail');
+  const loadMore = async () => {
+    const current = folder;
+    const config = FOLDERS.find((f) => f.id === current)!;
+    setIsLoadingMore(true);
+    // Added before the request, so a refresh that finishes meanwhile can't
+    // replace the list the new page is about to be appended to.
+    const hadExtraPages = extraPages.current.has(current);
+    extraPages.current.add(current);
+    const response = await config.load(lists[current].page + 1);
+    if (response.success && response.data) {
+      // Append to whatever the list is now, not to the snapshot from before the request.
+      setLists((prev) => ({ ...prev, [current]: toListState(response, prev[current]) ?? prev[current] }));
+    } else {
+      // Nothing was added, so the folder goes back to refreshing normally.
+      if (!hadExtraPages) extraPages.current.delete(current);
+      setError(response.error || 'Failed to load more emails');
+    }
+    setIsLoadingMore(false);
   };
 
-  const filteredScheduledEmails = scheduledEmails.filter(email => 
-    email.recipientEmail?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    email.subject?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (email.recipientName?.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
+  const isSplit = () => window.matchMedia(SPLIT_QUERY).matches;
 
-  const filteredSentEmails = sentEmails.filter(email => 
-    email.recipientEmail?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    email.subject?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (email.recipientName?.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
+  const openEmail = (email: Email) => {
+    setSelected(email);
+    setActionError('');
+    // When the detail replaces the list, move focus to it so keyboard and
+    // screen reader users land on what just opened.
+    if (isSplit()) requestAnimationFrame(() => detailHeading.current?.focus());
+  };
 
-  // Compose View
-  if (viewMode === 'compose') {
+  const closeEmail = () => {
+    const id = selected?.id;
+    setSelected(null);
+    setActionError('');
+    if (id) requestAnimationFrame(() => rowRefs.current.get(id)?.focus());
+  };
+
+  const switchFolder = (next: Folder) => {
+    setFolder(next);
+    setSelected(null);
+    setActionError('');
+  };
+
+  const confirmCancel = async () => {
+    if (!selected) return;
+    setIsActing(true);
+    const response = await emailService.cancelScheduledEmail(selected.id);
+    setIsActing(false);
+    cancelDialog.current?.close();
+    if (response.success) {
+      setSuccess(`The email to ${selected.recipientEmail} was cancelled.`);
+      setSelected(null);
+      reload();
+    } else {
+      setActionError(response.error || 'Failed to cancel the email');
+    }
+  };
+
+  const handleRetry = async (email: Email) => {
+    setIsActing(true);
+    const response = await emailService.retryFailedEmail(email.id);
+    setIsActing(false);
+    if (response.success) {
+      setSuccess(`The email to ${email.recipientEmail} will be sent again now.`);
+      switchFolder('scheduled');
+      reload();
+    } else {
+      setActionError(response.error || 'Failed to retry the email');
+    }
+  };
+
+  const matchesSearch = (email: Email) => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return true;
     return (
-      <ComposeEmail onClose={() => {
-        setViewMode('list');
-        fetchData();
-      }} />
+      email.recipientEmail?.toLowerCase().includes(query) ||
+      email.subject?.toLowerCase().includes(query) ||
+      Boolean(email.recipientName?.toLowerCase().includes(query))
+    );
+  };
+
+  const activeFolder = FOLDERS.find((f) => f.id === folder)!;
+  const activeList = lists[folder];
+  const visibleEmails = activeList.emails.filter(matchesSearch);
+  const tabStopId =
+    [activeRowId, selected?.id].find((id) => id && visibleEmails.some((email) => email.id === id)) ??
+    visibleEmails[0]?.id;
+  const countOf = (f: (typeof FOLDERS)[number]) => (stats ? f.count(stats) : lists[f.id].emails.length);
+
+  const mailRow = (email: Email, onTimeline: boolean) => {
+    const when = parseDate(whenOf(email));
+    return (
+      <button
+        type="button"
+        ref={(el) => {
+          if (el) rowRefs.current.set(email.id, el);
+          else rowRefs.current.delete(email.id);
+        }}
+        className={`app-mail-row${onTimeline ? ' app-tl-row' : ''}`}
+        aria-current={selected?.id === email.id ? 'true' : undefined}
+        tabIndex={email.id === tabStopId ? 0 : -1}
+        onFocus={() => setActiveRowId(email.id)}
+        onClick={() => openEmail(email)}
+      >
+        {onTimeline && (
+          <>
+            {/* The day is in the heading above, so the rail shows only the time.
+                Screen readers moving row by row still hear the day. */}
+            <span className="app-tl-row__time">
+              {when && <span className="pane-visually-hidden">{dayLabel(when, new Date(now))}, </span>}
+              {when ? timeLabel(when) : ''}
+            </span>
+            <span
+              className={`app-tl-dot${email.status === 'RETRYING' ? ' app-tl-dot--retrying' : ''}${
+                when && when.getTime() <= now ? ' app-tl-dot--due' : ''
+              }`}
+              aria-hidden="true"
+            />
+          </>
+        )}
+        <span className="app-mail-row__text">
+          <span className="app-mail-row__top">
+            <span className="app-mail-row__name">{email.recipientName || email.recipientEmail}</span>
+            {!onTimeline && <span className="app-mail-row__time">{formatShort(whenOf(email), false)}</span>}
+          </span>
+          <span className="app-mail-row__subject">
+            {email.status === 'RETRYING' && (
+              <span className="app-mail-row__flag">
+                <RotateCcw aria-hidden="true" />
+                Retrying ·
+              </span>
+            )}
+            {email.status === 'SCHEDULED' && onTimeline && when && when.getTime() <= now && (
+              <span className="app-mail-row__flag app-mail-row__flag--due">Sending now ·</span>
+            )}
+            {email.subject || 'No subject'}
+          </span>
+          <span className="app-mail-row__preview">{email.body?.slice(0, 200) || 'No content'}</span>
+        </span>
+      </button>
+    );
+  };
+
+  // Up/Down move through the list and open each email, like Mail; Home and End
+  // jump to the ends. Tab leaves the list.
+  const handleListKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    const index = visibleEmails.findIndex((email) => rowRefs.current.get(email.id) === document.activeElement);
+    if (index === -1) return;
+    const target =
+      e.key === 'ArrowDown' ? index + 1
+      : e.key === 'ArrowUp' ? index - 1
+      : e.key === 'Home' ? 0
+      : e.key === 'End' ? visibleEmails.length - 1
+      : null;
+    if (target === null) return;
+    const next = visibleEmails[target];
+    if (!next) return;
+    e.preventDefault();
+    rowRefs.current.get(next.id)?.focus();
+    if (!isSplit()) openEmail(next);
+  };
+
+  // ---- Compose -------------------------------------------------------------
+  if (isComposing) {
+    return (
+      <ComposeEmail
+        onCancel={() => setIsComposing(false)}
+        onScheduled={(message) => {
+          setSuccess(message);
+          switchFolder('scheduled');
+          setIsComposing(false);
+          reload();
+        }}
+      />
     );
   }
 
-  // Email Detail View
-  if (viewMode === 'detail' && selectedEmail) {
-    return (
-      <div className="min-h-screen bg-gray-900 flex flex-col">
-        {/* Header */}
-        <div className="bg-gray-800 px-6 py-4 flex items-center gap-4">
-          <button 
-            onClick={() => setViewMode('list')} 
-            className="text-white hover:text-gray-300"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-            </svg>
-          </button>
-          <h1 className="text-white text-lg font-medium truncate">
-            {selectedEmail.recipientName || selectedEmail.recipientEmail}, {selectedEmail.subject}
-          </h1>
-        </div>
+  const compose = () => {
+    setSuccess('');
+    setIsComposing(true);
+  };
 
-        {/* Email Content */}
-        <div className="flex-1 bg-white overflow-auto">
-          <div className="max-w-4xl mx-auto py-8 px-6">
-            {/* Sender Info */}
-            <div className="flex items-start gap-4 mb-6 pb-6 border-b border-gray-100">
-              <div className="h-10 w-10 rounded-full bg-green-500 flex items-center justify-center text-white font-medium">
-                {user?.name?.charAt(0) || 'U'}
-              </div>
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-gray-900">{user?.name || 'User'}</span>
-                  <span className="text-gray-400 text-sm">&lt;{user?.email}&gt;</span>
-                </div>
-                <div className="text-sm text-gray-500">
-                  to {selectedEmail.recipientName || selectedEmail.recipientEmail}
-                </div>
-              </div>
-              <div className="text-sm text-gray-500">
-                {formatDetailDate('scheduledAt' in selectedEmail ? selectedEmail.scheduledAt : selectedEmail.sentAt || '')}
-              </div>
-            </div>
-
-            {/* Subject */}
-            <h2 className="text-xl font-medium text-gray-900 mb-6">{selectedEmail.subject}</h2>
-
-            {/* Body */}
-            <div className="prose prose-gray max-w-none">
-              <div className="whitespace-pre-wrap text-gray-700">{selectedEmail.body}</div>
-            </div>
-
-            {/* Status Badge */}
-            <div className="mt-8 pt-6 border-t border-gray-100">
-              {'status' in selectedEmail && (
-                <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
-                  selectedEmail.status === 'SENT'
-                    ? 'bg-green-100 text-green-700'
-                    : selectedEmail.status === 'FAILED'
-                    ? 'bg-red-100 text-red-700'
-                    : selectedEmail.status === 'RETRYING'
-                    ? 'bg-yellow-100 text-yellow-700'
-                    : 'bg-orange-100 text-orange-700'
-                }`}>
-                  {selectedEmail.status}
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Footer - Homepage link */}
-        <div className="bg-gray-800 px-6 py-3 text-center">
-          <span className="text-gray-400 text-sm">Homepage</span>
-        </div>
-      </div>
-    );
-  }
-
+  // ---- Mailbox ---------------------------------------------------------------
   return (
-    <div className="min-h-screen bg-white flex">
-      {/* Sidebar */}
-      <aside className="w-50 border-r border-gray-200 flex flex-col min-h-screen">
-        {/* Logo */}
-        <div className="p-4">
-          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">ONB</h1>
+    <>
+      <SkipLink />
+      <TopBar fluid>
+        <span className="pane-nav__brand">
+          <span className="app-brand-mark" aria-hidden="true">
+            <CalendarClock />
+          </span>
+          Scheduler
+        </span>
+        <div className="app-nav-actions">
+          <div className="app-account">
+            <Avatar name={user?.name} picture={user?.picture} />
+            <span className="app-account__name">{user?.name || user?.email}</span>
+          </div>
+          <button type="button" className="pane-btn pane-btn--plain" onClick={logout} aria-label="Log out">
+            <LogOut aria-hidden="true" />
+            <span className="app-hide-narrow" aria-hidden="true">Log out</span>
+          </button>
         </div>
+      </TopBar>
 
-        {/* User Profile */}
-        <div className="px-4 py-3">
-          <div className="flex items-center gap-2">
-            {user?.picture ? (
-              <img
-                src={user.picture}
-                alt={user?.name || 'User'}
-                className="h-8 w-8 rounded-full"
-              />
-            ) : (
-              <div className="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 text-sm font-medium">
-                {user?.name?.charAt(0) || 'U'}
+      <div className="app-shell" data-view={selected ? 'detail' : 'list'}>
+        {/* ---- Sidebar ---- */}
+        <nav className="app-sidebar" aria-label="Mailboxes">
+          <button type="button" className="pane-btn pane-btn--filled app-sidebar__compose" onClick={compose}>
+            <SquarePen aria-hidden="true" />
+            <span>New email</span>
+          </button>
+
+          <ul className="app-folders">
+            {FOLDERS.map((f) => (
+              <li key={f.id}>
+                <button
+                  type="button"
+                  className="app-folder"
+                  aria-current={folder === f.id ? 'page' : undefined}
+                  onClick={() => switchFolder(f.id)}
+                >
+                  <f.Icon aria-hidden="true" />
+                  <span className="app-folder__label">{f.label}</span>
+                  <span className="app-folder__count">{countOf(f)}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+
+          {stats && (
+            <p className="app-sidebar__today">
+              <Sun aria-hidden="true" />
+              {stats.pendingToday === 0
+                ? 'Nothing else goes out today'
+                : `${stats.pendingToday} ${stats.pendingToday === 1 ? 'email goes' : 'emails go'} out later today`}
+            </p>
+          )}
+        </nav>
+
+        <main id="main" tabIndex={-1} className="app-panes">
+          {/* ---- List ---- */}
+          <section className="app-pane app-pane--list" aria-labelledby="list-title" aria-busy={isLoading}>
+            <header className="app-pane__header">
+              <div className="app-pane__title">
+                <h1 id="list-title">{activeFolder.label}</h1>
+                <p>
+                  {isLoading ? 'Loading…' : `${countOf(activeFolder)} ${countOf(activeFolder) === 1 ? 'email' : 'emails'}`}
+                </p>
+              </div>
+              <div className="app-pane__actions">
+                <button
+                type="button"
+                className="pane-btn pane-btn--plain pane-btn--icon app-only-phone"
+                onClick={compose}
+                aria-label="New email"
+                title="New email"
+              >
+                <SquarePen aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className="pane-btn pane-btn--plain pane-btn--icon"
+                onClick={reload}
+                aria-label="Refresh"
+                title="Refresh"
+                disabled={isLoading}
+              >
+                <RefreshCw aria-hidden="true" />
+              </button>
+              </div>
+            </header>
+
+            <div className="app-pane__search">
+              <div className="pane-search">
+                <Search aria-hidden="true" />
+                <label htmlFor="email-search" className="pane-visually-hidden">
+                  Search {activeFolder.label.toLowerCase()} emails
+                </label>
+                <input
+                  id="email-search"
+                  type="search"
+                  className="pane-input"
+                  placeholder="Search"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {(success || error) && (
+              <div className="app-pane__notices">
+                {success && <Notice tone="success">{success}</Notice>}
+                {error && <Notice tone="error">{error}</Notice>}
               </div>
             )}
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-900 truncate">{user?.name || 'User'}</p>
-              <p className="text-xs text-gray-500 truncate">{user?.email}</p>
+
+            <div className="app-pane__scroll">
+              {isLoading ? (
+                <div className="app-center" style={{ padding: 'var(--pane-space-16)' }}>
+                  <span className="pane-spinner app-spinner-lg" aria-label="Loading emails" role="status" />
+                </div>
+              ) : visibleEmails.length === 0 ? (
+                <div className="app-empty">
+                  <activeFolder.Icon aria-hidden="true" />
+                  <p className="pane-headline">{searchQuery ? 'No matching emails' : activeFolder.empty.title}</p>
+                  <p className="pane-secondary">
+                    {searchQuery ? 'Try a different name, address or subject.' : activeFolder.empty.text}
+                  </p>
+                  {!searchQuery && folder === 'scheduled' && (
+                    <button type="button" className="pane-btn pane-btn--tinted" onClick={compose}>
+                      New email
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div ref={listRef} onKeyDown={handleListKey}>
+                  {folder === 'scheduled' ? (
+                    <ScheduledTimeline
+                      emails={visibleEmails}
+                      now={now}
+                      complete={activeList.page >= activeList.totalPages}
+                      renderRow={(email) => mailRow(email, true)}
+                    />
+                  ) : (
+                    <ul className="app-mail-list" aria-label={`${activeFolder.label} emails`}>
+                      {visibleEmails.map((email) => (
+                        <li key={email.id}>{mailRow(email, false)}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+
+              {!isLoading && activeList.page < activeList.totalPages && !searchQuery && (
+                <div className="app-center">
+                  <button
+                    type="button"
+                    className="pane-btn pane-btn--gray pane-btn--sm"
+                    onClick={loadMore}
+                    disabled={isLoadingMore}
+                    aria-busy={isLoadingMore}
+                  >
+                    {isLoadingMore ? 'Loading…' : 'Load more'}
+                  </button>
+                </div>
+              )}
             </div>
-            <button onClick={logout} className="text-gray-400 hover:text-gray-600">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-          </div>
-        </div>
+          </section>
 
-        {/* Compose Button */}
-        <div className="px-4 py-3">
-          <button
-            onClick={() => setViewMode('compose')}
-            className="w-full py-2.5 px-4 border-2 border-green-500 text-green-600 font-medium rounded-lg hover:bg-green-50 transition-colors"
-          >
-            Compose
-          </button>
-        </div>
-
-        {/* Navigation */}
-        <nav className="flex-1 px-2 py-4">
-          <p className="px-3 text-xs font-medium text-gray-400 uppercase tracking-wider mb-2">Core</p>
-          
-          <button
-            onClick={() => setActiveTab('scheduled')}
-            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-              activeTab === 'scheduled'
-                ? 'bg-green-50 text-gray-900'
-                : 'text-gray-600 hover:bg-gray-50'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              Scheduled
-            </div>
-            <span className={`text-xs px-1.5 py-0.5 rounded ${activeTab === 'scheduled' ? 'bg-green-100 text-green-700' : 'text-gray-400'}`}>
-              {stats?.totalScheduled || scheduledEmails.length}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('sent')}
-            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-colors mt-1 ${
-              activeTab === 'sent'
-                ? 'bg-green-50 text-gray-900'
-                : 'text-gray-600 hover:bg-gray-50'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-              </svg>
-              Sent
-            </div>
-            <span className={`text-xs px-1.5 py-0.5 rounded ${activeTab === 'sent' ? 'bg-green-100 text-green-700' : 'text-gray-400'}`}>
-              {stats?.totalSent || sentEmails.length}
-            </span>
-          </button>
-        </nav>
-      </aside>
-
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col">
-        {/* Search Header */}
-        <div className="border-b border-gray-200 px-6 py-3">
-          <div className="flex items-center gap-4">
-            <div className="flex-1 relative">
-              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-              <input
-                type="text"
-                placeholder="Search"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent bg-gray-50"
+          {/* ---- Detail ---- */}
+          <section className="app-pane app-pane--detail" aria-label="Email">
+            {selected ? (
+              <EmailDetail
+                email={selected}
+                folderLabel={activeFolder.label}
+                from={user?.name ? `${user.name} <${user.email}>` : user?.email || ''}
+                headingRef={detailHeading}
+                actionError={actionError}
+                isActing={isActing}
+                onBack={closeEmail}
+                onCancel={() => cancelDialog.current?.showModal()}
+                onRetry={() => handleRetry(selected)}
               />
-            </div>
-            <button className="p-2 text-gray-400 hover:text-gray-600">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-              </svg>
-            </button>
-            <button onClick={handleRefresh} className="p-2 text-gray-400 hover:text-gray-600">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-            </button>
-          </div>
+            ) : (
+              <div className="app-empty app-pane__placeholder">
+                <Mail aria-hidden="true" />
+                <p className="pane-headline">No email selected</p>
+                <p className="pane-secondary">Choose an email from the list to see it here.</p>
+              </div>
+            )}
+          </section>
+        </main>
+      </div>
+
+      <dialog
+        ref={cancelDialog}
+        className="pane-dialog"
+        aria-labelledby="cancel-title"
+        aria-describedby="cancel-text"
+        onClick={(e) => {
+          // A click on the backdrop (the dialog element itself) closes it.
+          if (e.target === e.currentTarget && !isActing) cancelDialog.current?.close();
+        }}
+      >
+        <div className="pane-dialog__body">
+          <h2 id="cancel-title" className="pane-dialog__title">Cancel this email?</h2>
+          <p id="cancel-text" className="pane-dialog__text">
+            The email to {selected?.recipientEmail} won't be sent. This can't be undone.
+          </p>
+        </div>
+        <div className="pane-dialog__actions">
+          <button
+            type="button"
+            className="pane-btn pane-btn--gray"
+            onClick={() => cancelDialog.current?.close()}
+            disabled={isActing}
+            autoFocus
+          >
+            Keep
+          </button>
+          <button
+            type="button"
+            className="pane-btn pane-btn--danger"
+            onClick={confirmCancel}
+            disabled={isActing}
+            aria-busy={isActing}
+          >
+            Cancel email
+          </button>
+        </div>
+      </dialog>
+    </>
+  );
+};
+
+const EmailDetail = ({
+  email,
+  folderLabel,
+  from,
+  headingRef,
+  actionError,
+  isActing,
+  onBack,
+  onCancel,
+  onRetry,
+}: {
+  email: Email;
+  folderLabel: string;
+  from: string;
+  headingRef: RefObject<HTMLHeadingElement | null>;
+  actionError: string;
+  isActing: boolean;
+  onBack: () => void;
+  onCancel: () => void;
+  onRetry: () => void;
+}) => {
+  const isPending = email.status === 'SCHEDULED' || email.status === 'RETRYING';
+  return (
+    <article className="app-detail-pane">
+      <div className="app-detail-pane__bar">
+        <button type="button" className="pane-btn pane-btn--plain app-only-split" onClick={onBack}>
+          <ChevronLeft aria-hidden="true" />
+          {folderLabel}
+        </button>
+        <span className="app-detail-pane__spacer" />
+        {isPending && (
+          <button type="button" className="pane-btn pane-btn--danger pane-btn--sm" onClick={onCancel} disabled={isActing}>
+            <Trash2 aria-hidden="true" />
+            Cancel email
+          </button>
+        )}
+        {email.status === 'FAILED' && (
+          <button
+            type="button"
+            className="pane-btn pane-btn--filled pane-btn--sm"
+            onClick={onRetry}
+            disabled={isActing}
+            aria-busy={isActing}
+          >
+            <RotateCcw aria-hidden="true" />
+            Retry now
+          </button>
+        )}
+      </div>
+
+      <div className="app-detail-pane__content">
+        {actionError && <Notice tone="error">{actionError}</Notice>}
+
+        <header className="app-detail-pane__header">
+          <StatusBadge status={email.status} />
+          <h2 ref={headingRef} tabIndex={-1} className="pane-title-2">
+            {email.subject || 'No subject'}
+          </h2>
+        </header>
+
+        <div className="app-detail-pane__people">
+          <Avatar name={email.recipientName || email.recipientEmail} large />
+          <dl className="app-meta">
+            <dt>To</dt>
+            <dd>{email.recipientName ? `${email.recipientName} <${email.recipientEmail}>` : email.recipientEmail}</dd>
+            <dt>From</dt>
+            <dd>{from}</dd>
+            <dt>{email.status === 'SENT' ? 'Sent' : email.status === 'FAILED' ? 'Was due' : 'Sends'}</dt>
+            <dd>{formatWhen(whenOf(email), true)}</dd>
+            {email.attemptCount > 1 && (
+              <>
+                <dt>Attempts</dt>
+                <dd>{email.attemptCount}</dd>
+              </>
+            )}
+          </dl>
         </div>
 
-        {/* Email List */}
-        <div className="flex-1 overflow-auto">
-          {isLoading ? (
-            <div className="flex items-center justify-center h-64">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500"></div>
-            </div>
-          ) : activeTab === 'scheduled' ? (
-            filteredScheduledEmails.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-64 text-gray-500">
-                <svg className="w-12 h-12 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                </svg>
-                <p className="font-medium">No scheduled emails</p>
-                <p className="text-sm">Click Compose to create a new email</p>
-              </div>
-            ) : (
-              <div className="divide-y divide-gray-100">
-                {filteredScheduledEmails.map((email) => (
-                  <div 
-                    key={email.id} 
-                    onClick={() => handleEmailClick(email)}
-                    className="flex items-center px-6 py-3 hover:bg-gray-50 cursor-pointer group"
-                  >
-                    <div className="w-45 text-sm text-gray-600">
-                      To: {email.recipientName || email.recipientEmail?.split('@')[0] || 'Unknown'}
-                    </div>
-                    <div className="flex items-center gap-3 flex-1 min-w-0">
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-orange-50 text-orange-600 whitespace-nowrap">
-                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        {formatScheduleTime(email.scheduledAt)}
-                      </span>
-                      <span className="font-medium text-gray-900 truncate">{email.subject || 'No subject'}</span>
-                      <span className="text-gray-400">-</span>
-                      <span className="text-gray-500 truncate text-sm">{email.body?.substring(0, 50) || 'No content'}...</span>
-                    </div>
-                    <button className="p-1 text-gray-300 hover:text-yellow-400 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-                      </svg>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )
-          ) : (
-            filteredSentEmails.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-64 text-gray-500">
-                <svg className="w-12 h-12 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                </svg>
-                <p className="font-medium">No sent emails</p>
-                <p className="text-sm">Sent emails will appear here</p>
-              </div>
-            ) : (
-              <div className="divide-y divide-gray-100">
-                {filteredSentEmails.map((email) => (
-                  <div 
-                    key={email.id} 
-                    onClick={() => handleEmailClick(email)}
-                    className="flex items-center px-6 py-3 hover:bg-gray-50 cursor-pointer group"
-                  >
-                    <div className="w-45 text-sm text-gray-600">
-                      To: {email.recipientName || email.recipientEmail?.split('@')[0] || 'Unknown'}
-                    </div>
-                    <div className="flex items-center gap-3 flex-1 min-w-0">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 whitespace-nowrap">
-                        Sent
-                      </span>
-                      <span className="font-medium text-gray-900 truncate">{email.subject || 'No subject'}</span>
-                      <span className="text-gray-400">-</span>
-                      <span className="text-gray-500 truncate text-sm">{email.body?.substring(0, 50) || 'No content'}...</span>
-                    </div>
-                    <button className="p-1 text-gray-300 hover:text-yellow-400 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-                      </svg>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )
-          )}
-        </div>
-      </main>
+        {email.errorMessage && email.status !== 'SENT' && <Notice tone="error">{email.errorMessage}</Notice>}
+
+        <hr className="pane-separator" />
+
+        <div className="app-body">{email.body}</div>
+      </div>
+    </article>
+  );
+};
+
+type TimelineEntry = { kind: 'email'; email: Email; at: Date } | { kind: 'now'; at: Date };
+
+/**
+ * Scheduled emails on a day timeline, soonest first, with a "now" line between
+ * what is already due and what is still to come. Today always gets a heading
+ * when the line falls there, so you can see where you are.
+ */
+const ScheduledTimeline = ({
+  emails,
+  now,
+  complete,
+  renderRow,
+}: {
+  emails: Email[];
+  now: number;
+  /** Every scheduled email is loaded, so nothing comes after the last one. */
+  complete: boolean;
+  renderRow: (email: Email) => ReactNode;
+}) => {
+  const nowDate = new Date(now);
+  const entries: TimelineEntry[] = emails.map((email) => ({
+    kind: 'email',
+    email,
+    at: parseDate(email.scheduledAt) ?? nowDate,
+  }));
+  // The list may be cut off by paging: only place the line if it falls inside what's loaded.
+  const nowIndex = entries.findIndex((entry) => entry.at.getTime() > now);
+  if (nowIndex !== -1) entries.splice(nowIndex, 0, { kind: 'now', at: nowDate });
+  else if (complete && entries.length > 0) entries.push({ kind: 'now', at: nowDate });
+
+  return (
+    <div className="app-timeline">
+      {groupByDay(entries, (entry) => entry.at).map((day) => (
+        <section key={day.key} aria-labelledby={`day-${day.key}`}>
+          <h2 id={`day-${day.key}`} className="app-timeline__day">
+            {dayLabel(day.date, nowDate)}
+          </h2>
+          <ul className="app-timeline__list">
+            {day.items.map((entry) =>
+              entry.kind === 'now' ? (
+                <li key="now" className="app-tl-now">
+                  <span className="app-tl-now__time">
+                    <span className="pane-visually-hidden">Now, </span>
+                    {timeLabel(entry.at)}
+                  </span>
+                  <span className="app-tl-now__line" aria-hidden="true" />
+                </li>
+              ) : (
+                <li key={entry.email.id}>{renderRow(entry.email)}</li>
+              )
+            )}
+          </ul>
+        </section>
+      ))}
     </div>
   );
 };

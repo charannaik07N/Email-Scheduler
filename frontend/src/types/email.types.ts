@@ -3,43 +3,33 @@ export interface EmailRecipient {
   name?: string;
 }
 
-export interface ScheduleConfig {
-  startTime: string; // ISO 8601 format
-  delayBetweenEmails: number; // in seconds
-  hourlyLimit: number;
-}
+export type EmailStatus = 'SCHEDULED' | 'RETRYING' | 'SENT' | 'FAILED';
 
-export interface EmailData {
-  subject: string;
-  body: string;
-  recipients: EmailRecipient[];
-  scheduleConfig: ScheduleConfig;
-}
-
-export interface ScheduledEmail {
+export interface Email {
   id: string;
+  senderId: string;
   recipientEmail: string;
   recipientName?: string | null;
   subject: string;
   body: string;
   htmlBody?: string | null;
   scheduledAt: string;
-  status: 'SCHEDULED' | 'RETRYING' | 'FAILED';
+  sentAt?: string | null;
+  status: EmailStatus;
+  attemptCount: number;
+  errorMessage?: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface SentEmail {
+export interface Sender {
   id: string;
-  recipientEmail: string;
-  recipientName?: string | null;
-  subject: string;
-  body: string;
-  htmlBody?: string | null;
-  sentAt: string | null;
-  status: 'SENT' | 'FAILED';
-  errorMessage?: string | null;
-  createdAt: string;
+  name: string;
+  email: string;
+  smtpHost?: string | null;
+  smtpPort?: number | null;
+  smtpUser?: string | null;
+  hasSmtpPassword: boolean;
 }
 
 export interface EmailStats {
@@ -49,11 +39,32 @@ export interface EmailStats {
   pendingToday: number;
 }
 
+export interface BulkScheduleRecipient {
+  recipientEmail: string;
+  recipientName?: string;
+  scheduledAt: string;
+  idempotencyKey?: string;
+}
+
+export interface BulkScheduleRequest {
+  senderId: string;
+  subject: string;
+  body: string;
+  htmlBody?: string;
+  recipients: BulkScheduleRecipient[];
+}
+
+export interface BulkScheduleResult {
+  scheduled: Email[];
+  failed: { recipientEmail: string; error: string }[];
+}
+
 export interface ApiResponse<T> {
   success: boolean;
   data?: T;
   message?: string;
   error?: string;
+  cancelled?: boolean;
 }
 
 export interface PaginatedResponse<T> {

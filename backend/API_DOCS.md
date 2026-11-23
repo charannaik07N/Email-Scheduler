@@ -1,834 +1,317 @@
-# Supabase API Documentation
-
-This document describes all available API endpoints for interacting with the Supabase database.
+# Email Scheduler API Documentation
 
 ## Base URL
 
 ```
-http://localhost:3000/api/supabase
+http://localhost:5000/api
 ```
+
+`GET /health` (outside `/api`) returns the server status.
 
 ## Authentication
 
-Most endpoints require a JWT token. Include it in the Authorization header:
+Sign-in is with Google only. Exchange a Google ID token for an app token with `POST /auth/google-login`, then send the app token on every other request:
 
 ```
-Authorization: Bearer <your-jwt-token>
+Authorization: Bearer <token>
 ```
+
+Tokens expire after 7 days. A missing, invalid or expired token, or one whose account no longer exists, gets `401`.
+
+## Response format
+
+```json
+{ "success": true, "data": { ... }, "message": "..." }
+{ "success": false, "error": "..." }
+```
+
+Validation errors return `400` with `"error": "Validation error"` and a `details` array. The auth endpoints return `user` (and `token`) at the top level instead of under `data`.
+
+## Rate limits
+
+- All `/api` routes: `API_RATE_LIMIT_PER_15_MIN` requests per 15 minutes per signed-in user, or per client IP without a valid token (default 600).
+- `POST /auth/google-login`: 10 failed attempts per 15 minutes per IP.
+
+Exceeding a limit returns `429`.
 
 ---
 
-## 🔐 Auth Endpoints
+## Auth
 
-### Register User
+### POST /auth/google-login
 
-Create a new user account.
+Public. Verifies the Google ID token (the `credential` from Google Identity Services) with `google-auth-library` against `GOOGLE_CLIENT_ID`. Creates the user on first sign-in, along with a default sender using the account's email.
 
-**Endpoint:** `POST 
-**Access:** Public
-
-**Request Body:**
+**Request:**
 
 ```json
-{
-  "email": "user@example.com",
-  "password": "securepassword123",
-  "full_name": "John Doe" // optional
-}
+{ "googleToken": "<Google ID token>" }
 ```
 
-**Response (201):**
+**Response (200):**
 
 ```json
 {
-  "message": "User registered successfully",
+  "success": true,
+  "message": "Google login successful",
   "user": {
     "id": "uuid",
     "email": "user@example.com",
-    "full_name": "John Doe",
-    "created_at": "2026-01-30T10:00:00Z"
+    "name": "Jane Doe",
+    "createdAt": "2026-01-30T10:00:00.000Z",
+    "picture": "https://..."
   },
-  "token": "jwt-token-here"
+  "token": "<app JWT>"
 }
 ```
+
+`401` if the token is invalid or the Google email is not verified.
+
+### GET /auth/profile
+
+**Response (200):** `{ "success": true, "user": { "id", "email", "name", "createdAt" } }`
+
+### PUT /auth/profile
+
+Only `name` can be changed (the email is the Google identity).
+
+**Request:** `{ "name": "New Name" }`
+
+**Response (200):** `{ "success": true, "message": "Profile updated successfully", "user": { ... } }`
 
 ---
 
-### Login
+## Emails
 
-Authenticate and get a JWT token.
+All `/emails` routes require a Bearer token. Users only see emails of their own senders.
 
-**Endpoint:** `POST /auth/login`  
-**Access:** Public
+### Email statuses
 
-**Request Body:**
+| Status      | Meaning                                                                 |
+| ----------- | ----------------------------------------------------------------------- |
+| `SCHEDULED` | Waiting in the queue                                                    |
+| `RETRYING`  | An attempt failed, or the sender's hourly limit was hit; will try again |
+| `SENT`      | Delivered to the SMTP server                                            |
+| `FAILED`    | Gave up after all attempts                                              |
+
+Cancelled emails are deleted, so there is no cancelled status.
+
+### Email object
 
 ```json
 {
-  "email": "user@example.com",
-  "password": "securepassword123"
+  "id": "uuid",
+  "senderId": "uuid",
+  "recipientEmail": "recipient@example.com",
+  "recipientName": "Recipient",
+  "subject": "Hello",
+  "body": "Plain text body",
+  "htmlBody": "<p>Optional HTML body</p>",
+  "scheduledAt": "2026-01-31T10:00:00.000Z",
+  "sentAt": null,
+  "status": "SCHEDULED",
+  "attemptCount": 0,
+  "errorMessage": null,
+  "createdAt": "...",
+  "updatedAt": "..."
 }
 ```
 
-**Response (200):**
+### POST /emails/schedule
+
+Schedule one email.
+
+**Request:**
 
 ```json
 {
-  "message": "Login successful",
-  "user": {
-    "id": "uuid",
-    "email": "user@example.com",
-    "full_name": "John Doe",
-    "created_at": "2026-01-30T10:00:00Z"
-  },
-  "token": "jwt-token-here"
+  "senderId": "uuid",
+  "recipientEmail": "recipient@example.com",
+  "recipientName": "Recipient",
+  "subject": "Hello",
+  "body": "Plain text body",
+  "htmlBody": "<p>optional</p>",
+  "scheduledAt": "2026-01-31T10:00:00Z",
+  "idempotencyKey": "optional-client-key"
 }
 ```
 
----
+- `scheduledAt`: ISO 8601 with offset; not in the past (2 minutes tolerance) and at most one year ahead.
+- `idempotencyKey`: optional, unique per user. Reusing it returns the existing email (and re-queues it if it is unsent but missing from the queue).
 
-### Get Profile
+**Response:** `201` with `data.email` when created, `200` with `"message": "Email already scheduled"` when the key was already used. `404` if the sender isn't yours, `503` if the queue is unavailable (nothing is saved).
 
-Get the current user's profile.
+### POST /emails/schedule/bulk
 
-**Endpoint:** `GET /auth/profile`  
-**Access:** Private (requires token)
+Schedule the same message to up to 500 recipients. Each recipient has its own `scheduledAt` (so the client controls spacing) and an optional `idempotencyKey`.
 
-**Response (200):**
-
-```json
-{
-  "user": {
-    "id": "uuid",
-    "email": "user@example.com",
-    "full_name": "John Doe",
-    "created_at": "2026-01-30T10:00:00Z",
-    "updated_at": "2026-01-30T10:00:00Z"
-  }
-}
-```
-
----
-
-### Update Profile
-
-Update the current user's profile.
-
-**Endpoint:** `PUT /auth/profile`  
-**Access:** Private (requires token)
-
-**Request Body:**
+**Request:**
 
 ```json
 {
-  "full_name": "John Updated Doe",
-  "email": "newemail@example.com" // optional
-}
-```
-
-**Response (200):**
-
-```json
-{
-  "message": "Profile updated successfully",
-  "user": {
-    "id": "uuid",
-    "email": "newemail@example.com",
-    "full_name": "John Updated Doe",
-    "created_at": "2026-01-30T10:00:00Z",
-    "updated_at": "2026-01-30T11:00:00Z"
-  }
-}
-```
-
----
-
-### Delete Account
-
-Delete the current user's account and all associated data.
-
-**Endpoint:** `DELETE /auth/profile`  
-**Access:** Private (requires token)
-
-**Response (200):**
-
-```json
-{
-  "message": "Account deleted successfully"
-}
-```
-
----
-
-### Get All Users (Admin)
-
-Get all registered users.
-
-**Endpoint:** `GET /users`  
-**Access:** Private (requires token)
-
-**Response (200):**
-
-```json
-{
-  "users": [
-    {
-      "id": "uuid",
-      "email": "user@example.com",
-      "full_name": "John Doe",
-      "created_at": "2026-01-30T10:00:00Z",
-      "updated_at": "2026-01-30T10:00:00Z"
-    }
-  ],
-  "count": 1
-}
-```
-
----
-
-## 📧 Sender Endpoints
-
-### Create Sender
-
-Create a new sender identity.
-
-**Endpoint:** `POST /senders`  
-**Access:** Private (requires token)
-
-**Request Body:**
-
-```json
-{
-  "email": "marketing@mycompany.com",
-  "name": "Marketing Team", // optional
-  "is_default": true // optional, default: false
-}
-```
-
-**Response (201):**
-
-```json
-{
-  "message": "Sender created successfully",
-  "sender": {
-    "id": "uuid",
-    "user_id": "uuid",
-    "email": "marketing@mycompany.com",
-    "name": "Marketing Team",
-    "is_default": true,
-    "created_at": "2026-01-30T10:00:00Z",
-    "updated_at": "2026-01-30T10:00:00Z"
-  }
-}
-```
-
----
-
-### Get All Senders
-
-Get all senders for the authenticated user.
-
-**Endpoint:** `GET /senders`  
-**Access:** Private (requires token)
-
-**Response (200):**
-
-```json
-{
-  "senders": [
-    {
-      "id": "uuid",
-      "user_id": "uuid",
-      "email": "marketing@mycompany.com",
-      "name": "Marketing Team",
-      "is_default": true,
-      "created_at": "2026-01-30T10:00:00Z",
-      "updated_at": "2026-01-30T10:00:00Z"
-    }
-  ],
-  "count": 1
-}
-```
-
----
-
-### Get Sender by ID
-
-Get a specific sender.
-
-**Endpoint:** `GET /senders/:senderId`  
-**Access:** Private (requires token)
-
-**Response (200):**
-
-```json
-{
-  "sender": {
-    "id": "uuid",
-    "user_id": "uuid",
-    "email": "marketing@mycompany.com",
-    "name": "Marketing Team",
-    "is_default": true,
-    "created_at": "2026-01-30T10:00:00Z",
-    "updated_at": "2026-01-30T10:00:00Z"
-  }
-}
-```
-
----
-
-### Update Sender
-
-Update a sender's details.
-
-**Endpoint:** `PUT /senders/:senderId`  
-**Access:** Private (requires token)
-
-**Request Body:**
-
-```json
-{
-  "email": "updated@mycompany.com", // optional
-  "name": "Updated Name", // optional
-  "is_default": false // optional
-}
-```
-
-**Response (200):**
-
-```json
-{
-  "message": "Sender updated successfully",
-  "sender": {
-    "id": "uuid",
-    "user_id": "uuid",
-    "email": "updated@mycompany.com",
-    "name": "Updated Name",
-    "is_default": false,
-    "created_at": "2026-01-30T10:00:00Z",
-    "updated_at": "2026-01-30T11:00:00Z"
-  }
-}
-```
-
----
-
-### Delete Sender
-
-Delete a sender.
-
-**Endpoint:** `DELETE /senders/:senderId`  
-**Access:** Private (requires token)
-
-**Response (200):**
-
-```json
-{
-  "message": "Sender deleted successfully"
-}
-```
-
----
-
-## 📬 Email Endpoints
-
-### Schedule Email
-
-Create and schedule a new email.
-
-**Endpoint:** `POST /emails`  
-**Access:** Private (requires token)
-
-**Request Body:**
-
-```json
-{
-  "sender_id": "uuid",
-  "recipient_email": "recipient@example.com",
-  "subject": "Hello from Email Scheduler",
-  "body": "This is the email body content.",
-  "scheduled_time": "2026-01-30T15:00:00Z",
-  "idempotency_key": "unique-key-123" // optional
-}
-```
-
-**Response (201):**
-
-```json
-{
-  "message": "Email scheduled successfully",
-  "email": {
-    "id": "uuid",
-    "user_id": "uuid",
-    "sender_id": "uuid",
-    "recipient_email": "recipient@example.com",
-    "subject": "Hello from Email Scheduler",
-    "body": "This is the email body content.",
-    "scheduled_time": "2026-01-30T15:00:00Z",
-    "status": "pending",
-    "idempotency_key": "unique-key-123",
-    "created_at": "2026-01-30T10:00:00Z",
-    "updated_at": "2026-01-30T10:00:00Z"
-  }
-}
-```
-
----
-
-### Get All Emails
-
-Get all emails for the authenticated user.
-
-**Endpoint:** `GET /emails`  
-**Access:** Private (requires token)
-
-**Query Parameters:**
-
-- `status` (optional): Filter by status (`pending`, `scheduled`, `sent`, `failed`, `cancelled`)
-- `sender_id` (optional): Filter by sender UUID
-- `limit` (optional): Number of results (default: 100)
-- `offset` (optional): Pagination offset (default: 0)
-
-**Example:** `GET /emails?status=pending&limit=50`
-
-**Response (200):**
-
-```json
-{
-  "emails": [
-    {
-      "id": "uuid",
-      "user_id": "uuid",
-      "sender_id": "uuid",
-      "recipient_email": "recipient@example.com",
-      "subject": "Hello from Email Scheduler",
-      "body": "This is the email body content.",
-      "scheduled_time": "2026-01-30T15:00:00Z",
-      "status": "pending",
-      "idempotency_key": "unique-key-123",
-      "error_message": null,
-      "sent_at": null,
-      "created_at": "2026-01-30T10:00:00Z",
-      "updated_at": "2026-01-30T10:00:00Z",
-      "senders": {
-        "id": "uuid",
-        "email": "marketing@mycompany.com",
-        "name": "Marketing Team"
-      }
-    }
-  ],
-  "count": 1
-}
-```
-
----
-
-### Get Email by ID
-
-Get a specific email.
-
-**Endpoint:** `GET /emails/:emailId`  
-**Access:** Private (requires token)
-
-**Response (200):**
-
-```json
-{
-  "email": {
-    "id": "uuid",
-    "user_id": "uuid",
-    "sender_id": "uuid",
-    "recipient_email": "recipient@example.com",
-    "subject": "Hello from Email Scheduler",
-    "body": "This is the email body content.",
-    "scheduled_time": "2026-01-30T15:00:00Z",
-    "status": "pending",
-    "idempotency_key": "unique-key-123",
-    "error_message": null,
-    "sent_at": null,
-    "created_at": "2026-01-30T10:00:00Z",
-    "updated_at": "2026-01-30T10:00:00Z",
-    "senders": {
-      "id": "uuid",
-      "email": "marketing@mycompany.com",
-      "name": "Marketing Team"
-    }
-  }
-}
-```
-
----
-
-### Update Email
-
-Update an email (only for pending/scheduled emails).
-
-**Endpoint:** `PUT /emails/:emailId`  
-**Access:** Private (requires token)
-
-**Request Body:**
-
-```json
-{
-  "recipient_email": "newrecipient@example.com", // optional
-  "subject": "Updated Subject", // optional
-  "body": "Updated body content.", // optional
-  "scheduled_time": "2026-01-31T15:00:00Z", // optional
-  "status": "scheduled" // optional
-}
-```
-
-**Response (200):**
-
-```json
-{
-  "message": "Email updated successfully",
-  "email": {
-    "id": "uuid",
-    "recipient_email": "newrecipient@example.com",
-    "subject": "Updated Subject",
-    "body": "Updated body content.",
-    "scheduled_time": "2026-01-31T15:00:00Z",
-    "status": "scheduled",
-    "updated_at": "2026-01-30T11:00:00Z"
-  }
-}
-```
-
----
-
-### Cancel/Delete Email
-
-Cancel (soft delete) or permanently delete an email.
-
-**Endpoint:** `DELETE /emails/:emailId`  
-**Access:** Private (requires token)
-
-**Query Parameters:**
-
-- `hard_delete` (optional): Set to `true` to permanently delete
-
-**Examples:**
-
-- `DELETE /emails/uuid` - Marks as cancelled
-- `DELETE /emails/uuid?hard_delete=true` - Permanently deletes
-
-**Response (200) - Soft Delete:**
-
-```json
-{
-  "message": "Email cancelled successfully",
-  "email": {
-    "id": "uuid",
-    "status": "cancelled",
-    "updated_at": "2026-01-30T11:00:00Z"
-  }
-}
-```
-
-**Response (200) - Hard Delete:**
-
-```json
-{
-  "message": "Email deleted successfully"
-}
-```
-
----
-
-## 📋 Email Log Endpoints
-
-### Create Email Log
-
-Create a log entry for an email.
-
-**Endpoint:** `POST /email-logs`  
-**Access:** Private (requires token)
-
-**Request Body:**
-
-```json
-{
-  "email_id": "uuid",
-  "status": "sent", // optional
-  "message": "Email delivered successfully" // optional
-}
-```
-
-**Response (201):**
-
-```json
-{
-  "message": "Email log created successfully",
-  "email_log": {
-    "id": "uuid",
-    "email_id": "uuid",
-    "status": "sent",
-    "message": "Email delivered successfully",
-    "attempted_at": "2026-01-30T10:00:00Z",
-    "created_at": "2026-01-30T10:00:00Z"
-  }
-}
-```
-
----
-
-### Get All Email Logs
-
-Get all email logs for the authenticated user.
-
-**Endpoint:** `GET /email-logs`  
-**Access:** Private (requires token)
-
-**Query Parameters:**
-
-- `status` (optional): Filter by status
-- `limit` (optional): Number of results (default: 100)
-- `offset` (optional): Pagination offset (default: 0)
-
-**Response (200):**
-
-```json
-{
-  "logs": [
-    {
-      "id": "uuid",
-      "email_id": "uuid",
-      "status": "sent",
-      "message": "Email delivered successfully",
-      "attempted_at": "2026-01-30T10:00:00Z",
-      "created_at": "2026-01-30T10:00:00Z",
-      "emails": {
-        "id": "uuid",
-        "subject": "Hello from Email Scheduler",
-        "recipient_email": "recipient@example.com"
-      }
-    }
-  ],
-  "count": 1
-}
-```
-
----
-
-### Get Email Logs by Email ID
-
-Get all logs for a specific email.
-
-**Endpoint:** `GET /email-logs/:emailId`  
-**Access:** Private (requires token)
-
-**Response (200):**
-
-```json
-{
-  "logs": [
-    {
-      "id": "uuid",
-      "email_id": "uuid",
-      "status": "sent",
-      "message": "Email delivered successfully",
-      "attempted_at": "2026-01-30T10:00:00Z",
-      "created_at": "2026-01-30T10:00:00Z"
-    }
-  ],
-  "count": 1
-}
-```
-
----
-
-### Delete Email Log
-
-Delete a specific log entry.
-
-**Endpoint:** `DELETE /email-logs/:logId`  
-**Access:** Private (requires token)
-
-**Response (200):**
-
-```json
-{
-  "message": "Email log deleted successfully"
-}
-```
-
----
-
-## 📊 Statistics Endpoint
-
-### Get Dashboard Stats
-
-Get email statistics for the authenticated user.
-
-**Endpoint:** `GET /stats`  
-**Access:** Private (requires token)
-
-**Response (200):**
-
-```json
-{
-  "stats": {
-    "totalEmails": 25,
-    "emailsByStatus": {
-      "pending": 5,
-      "scheduled": 8,
-      "sent": 10,
-      "failed": 1,
-      "cancelled": 1
-    },
-    "totalSenders": 3,
-    "recentActivity": {
-      "emailsCreated": 12,
-      "period": "7 days"
-    }
-  }
-}
-```
-
----
-
-## Error Responses
-
-All endpoints may return the following error responses:
-
-### 400 Bad Request
-
-```json
-{
-  "error": "Validation error",
-  "details": [
-    {
-      "code": "invalid_type",
-      "expected": "string",
-      "received": "undefined",
-      "path": ["email"],
-      "message": "Required"
-    }
+  "senderId": "uuid",
+  "subject": "Hello",
+  "body": "Plain text body",
+  "htmlBody": "<p>optional</p>",
+  "recipients": [
+    { "recipientEmail": "a@example.com", "recipientName": "A", "scheduledAt": "2026-01-31T10:00:00Z", "idempotencyKey": "draft-1:a@example.com" },
+    { "recipientEmail": "b@example.com", "scheduledAt": "2026-01-31T10:00:30Z" }
   ]
 }
 ```
 
-### 401 Unauthorized
+**Response:**
 
 ```json
 {
-  "error": "No token provided"
+  "success": false,
+  "message": "1 of 2 emails scheduled",
+  "error": "1 emails could not be scheduled",
+  "data": {
+    "scheduled": [ { "...email": "..." } ],
+    "failed": [ { "recipientEmail": "b@example.com", "error": "Email queue is unavailable" } ]
+  }
 }
 ```
 
-or
+| Status | When                                       |
+| ------ | ------------------------------------------ |
+| `201`  | All recipients scheduled                   |
+| `207`  | Some scheduled, some failed                |
+| `503`  | None scheduled because the queue is down   |
+| `400`  | None scheduled: every recipient was invalid or conflicted |
+| `500`  | None scheduled because of a server error   |
+
+Failed recipients can be sent again with the same idempotency keys; already scheduled ones are not duplicated.
+
+### GET /emails
+
+List emails by `scheduledAt`, latest first unless `order=asc`.
+
+| Query      | Description                                                        |
+| ---------- | ------------------------------------------------------------------ |
+| `status`   | Comma-separated list of `SCHEDULED`, `RETRYING`, `SENT`, `FAILED`  |
+| `senderId` | Only this sender's emails                                          |
+| `page`     | Page number, default 1                                             |
+| `limit`    | Page size 1-100, default 50                                        |
+| `order`    | `desc` (latest first, default) or `asc` (soonest first)            |
+
+Example: `GET /emails?status=SCHEDULED,RETRYING&page=1&limit=50&order=asc`
+
+**Response (200):**
 
 ```json
 {
-  "error": "Invalid or expired token"
+  "success": true,
+  "data": { "data": [ { "...email": "..." } ], "total": 120, "page": 1, "pageSize": 50, "totalPages": 3 }
 }
 ```
 
-### 403 Forbidden
+### GET /emails/stats
+
+| Query      | Description                                                                                  |
+| ---------- | -------------------------------------------------------------------------------------------- |
+| `tzOffset` | The browser's `new Date().getTimezoneOffset()` in minutes, so "today" is the user's today. Default 0 (UTC) |
+
+**Response (200):**
 
 ```json
-{
-  "error": "Access denied"
-}
+{ "success": true, "data": { "totalScheduled": 4, "totalSent": 10, "totalFailed": 1, "pendingToday": 2 } }
 ```
 
-### 404 Not Found
+`totalScheduled` and `pendingToday` count `SCHEDULED` and `RETRYING` emails.
 
-```json
-{
-  "error": "Resource not found"
-}
-```
+### GET /emails/:emailId
 
-### 409 Conflict
+**Response (200):** `{ "success": true, "data": { "email": { ... }, "logs": [ { "id", "emailId", "status", "message", "createdAt" } ] } }`
 
-```json
-{
-  "error": "Email with this idempotency key already exists"
-}
-```
+### DELETE /emails/:emailId
 
-### 500 Internal Server Error
+Cancel an unsent email: its queued job is removed and the email is deleted.
 
-```json
-{
-  "error": "Failed to perform action",
-  "details": "Error message from database"
-}
-```
+- Only `SCHEDULED` or `RETRYING` emails; others get `409`.
+- `409` if a worker is sending it right now.
+- `503` if the queue can't be reached.
+
+**Response (200):** `{ "success": true, "message": "Email cancelled successfully" }`
+
+### POST /emails/:emailId/retry
+
+Send a `FAILED` email again, now. Resets the attempt count. Other statuses get `409`, as does a retry while the last attempt is still finishing. `503` if the queue is unavailable.
+
+**Response (200):** `{ "success": true, "message": "Email queued for retry", "data": { "email": { ... } } }`
 
 ---
 
-## Quick Start Examples
+## Senders
 
-### Using cURL
+A sender is the "From" identity. Every user gets a default sender with their account email.
 
-**1. Register a new user:**
+- **Without its own SMTP settings** a sender uses the server's SMTP account, and its `email` must equal the account email (`400` otherwise).
+- **With its own SMTP settings** (`smtpHost`, plus `smtpUser` and `smtpPass`, optional `smtpPort`, default 587) it sends through that server and may use any address the server accepts.
+- SMTP passwords are never returned; responses include `hasSmtpPassword: true|false` instead.
 
-```bash
-curl -X POST http://localhost:3000/api/supabase/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email": "test@example.com", "password": "password123", "full_name": "Test User"}'
+### Sender object
+
+```json
+{
+  "id": "uuid",
+  "userId": "uuid",
+  "name": "Jane Doe",
+  "email": "user@example.com",
+  "smtpHost": null,
+  "smtpPort": null,
+  "smtpUser": null,
+  "hasSmtpPassword": false,
+  "createdAt": "...",
+  "updatedAt": "..."
+}
 ```
 
-**2. Login and get token:**
+### GET /emails/senders
 
-```bash
-curl -X POST http://localhost:3000/api/supabase/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email": "test@example.com", "password": "password123"}'
+Lists your senders, creating the default sender if it is missing.
+
+**Response (200):** `{ "success": true, "data": { "senders": [ ... ], "count": 1 } }`
+
+### POST /emails/senders
+
+**Request:**
+
+```json
+{
+  "name": "Marketing",
+  "email": "marketing@example.com",
+  "smtpHost": "smtp.example.com",
+  "smtpPort": 587,
+  "smtpUser": "smtp-user",
+  "smtpPass": "smtp-password"
+}
 ```
 
-**3. Create a sender (with token):**
+**Response (201):** `{ "success": true, "message": "Sender created successfully", "data": { "sender": { ... } } }`
 
-```bash
-curl -X POST http://localhost:3000/api/supabase/senders \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_TOKEN_HERE" \
-  -d '{"email": "sender@example.com", "name": "My Sender", "is_default": true}'
-```
+### PUT /emails/senders/:senderId
 
-**4. Schedule an email:**
+Any of the fields above; the same rules apply to the resulting sender.
 
-```bash
-curl -X POST http://localhost:3000/api/supabase/emails \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_TOKEN_HERE" \
-  -d '{
-    "sender_id": "SENDER_UUID",
-    "recipient_email": "recipient@example.com",
-    "subject": "Test Email",
-    "body": "Hello, this is a test!",
-    "scheduled_time": "2026-01-30T15:00:00Z"
-  }'
-```
+**Response (200):** `{ "success": true, "message": "Sender updated successfully", "data": { "sender": { ... } } }`
 
-**5. Get all emails:**
+### DELETE /emails/senders/:senderId
 
-```bash
-curl -X GET "http://localhost:3000/api/supabase/emails?status=pending" \
-  -H "Authorization: Bearer YOUR_TOKEN_HERE"
-```
+Refused with `409` while the sender still has unsent (`SCHEDULED` or `RETRYING`) emails; cancel them first.
+
+**Response (200):** `{ "success": true, "message": "Sender deleted successfully" }`
 
 ---
 
-## Running the Seed Script
-
-To populate your database with sample data:
+## Example
 
 ```bash
-npm run seed:supabase
+TOKEN="<app token from /auth/google-login>"
+
+curl -X POST http://localhost:5000/api/emails/schedule \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"senderId":"<sender-id>","recipientEmail":"recipient@example.com","subject":"Hello","body":"Hi there","scheduledAt":"2026-12-01T10:00:00Z"}'
 ```
-
-This will create:
-
-- 2 test users
-- 3 senders
-- 5 sample emails (various statuses)
-- 3 email logs
-
-Test credentials after seeding:
-
-- `john@example.com` / `password123`
-- `jane@example.com` / `password456`

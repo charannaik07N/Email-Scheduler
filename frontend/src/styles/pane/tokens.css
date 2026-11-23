@@ -1,0 +1,246 @@
+/* ==========================================================================
+   Pane design tokens
+   An Apple-inspired web design system. Framework-free CSS custom properties.
+
+   Theming: light values live on :root. Dark values apply when the OS is dark
+   (unless <html data-theme="light">) or when <html data-theme="dark">.
+   Glass: set <html data-glass="off"> to force the opaque fallback.
+   Contrast: every text/background pair below meets WCAG 2.2 AA (4.5:1);
+   see README "Contrast table" for the measured ratios.
+   ========================================================================== */
+
+:root {
+  color-scheme: light;
+
+  /* ---- Color: backgrounds (content layer, always opaque) ---- */
+  --pane-bg: #f5f5f7;              /* page / grouped background */
+  --pane-surface: #ffffff;         /* cards, sheets, inputs */
+  --pane-surface-2: #fbfbfd;       /* nested grouping inside a surface */
+  --pane-fill: rgba(120, 120, 128, 0.12);   /* gray button, track, chip */
+  --pane-fill-strong: rgba(120, 120, 128, 0.2);
+  --pane-separator: rgba(0, 0, 0, 0.1);     /* hairlines; decorative only */
+  --pane-control-border: #86868b;  /* input outline: 3.6:1 on surface */
+
+  /* ---- Color: labels ---- */
+  --pane-label: #1d1d1f;           /* primary text, 16.8:1 on surface */
+  --pane-label-2: #6e6e73;         /* secondary text, 4.66:1 on bg */
+  --pane-label-disabled: #86868b;  /* disabled only (exempt from contrast) */
+
+  /* ---- Color: accent & semantic ---- */
+  --pane-accent: #0071e3;          /* filled-button background */
+  --pane-on-accent: #ffffff;       /* text on accent, 4.7:1 */
+  --pane-accent-text: #0060c0;     /* links & tinted labels, 5.6:1 on bg, 4.9:1 on tint */
+  --pane-accent-tint: rgba(0, 113, 227, 0.1);
+  --pane-focus: #0071e3;           /* focus ring, >= 3:1 on bg and glass */
+  --pane-danger: #c40012;          /* 5.75:1 on bg, 4.8:1 on danger tint */
+  --pane-danger-tint: rgba(215, 0, 21, 0.1);
+  --pane-success: #1f7a37;
+  --pane-warning: #a34a00;
+
+  /* ---- Color: materials ---- */
+  /* Regular glass: blurs + lightens what is behind it. Only --pane-label
+     text goes on it (worst-case 8:1 light, 5.3:1 dark). */
+  --pane-glass-tint: rgba(250, 250, 252, 0.72);
+  --pane-glass-edge: rgba(255, 255, 255, 0.7);   /* inner top highlight */
+  --pane-glass-rim: rgba(0, 0, 0, 0.08);         /* outer hairline */
+  --pane-glass-opaque: #f9f9fb;    /* fallback when glass is unavailable/off */
+  /* Clear glass: for controls over photos/video only, icons only. */
+  --pane-glass-clear-tint: rgba(255, 255, 255, 0.14);
+  --pane-glass-clear-dim: rgba(0, 0, 0, 0.5);    /* dimming layer */
+  --pane-scrim: rgba(0, 0, 0, 0.32);             /* dialog backdrop */
+
+  /* ---- Glass physics ---- */
+  --pane-glass-blur: 24px;
+  --pane-glass-saturate: 180%;
+
+  /* ---- Typography ---- */
+  /* System fonts only: SF Pro on Apple devices, Segoe UI on Windows,
+     Roboto/Cantarell on Android/Linux. No font files are shipped. */
+  --pane-font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif, "Apple Color Emoji",
+    "Segoe UI Emoji";
+  --pane-font-serif: ui-serif, "New York", Charter, "Iowan Old Style",
+    Georgia, Cambria, serif;
+  --pane-font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  /* Type scale (rem, root = 16px). Body is 17px. */
+  --pane-text-caption: 0.75rem;      /* 12 */
+  --pane-text-footnote: 0.8125rem;   /* 13 */
+  --pane-text-subhead: 0.9375rem;    /* 15 */
+  --pane-text-body: 1.0625rem;       /* 17 */
+  --pane-text-title-3: 1.25rem;      /* 20 */
+  --pane-text-title-2: 1.5rem;       /* 24 */
+  --pane-text-title-1: 2rem;         /* 32 */
+  --pane-text-large-title: clamp(2.25rem, 1.6rem + 2.6vw, 3rem);  /* 36-48 */
+  --pane-text-display: clamp(2.75rem, 1.8rem + 4vw, 4.5rem);      /* 44-72 */
+
+  --pane-leading-tight: 1.1;
+  --pane-leading-snug: 1.25;
+  --pane-leading-body: 1.47;
+  --pane-leading-prose: 1.6;
+
+  --pane-tracking-display: -0.022em;
+  --pane-tracking-title: -0.012em;
+  --pane-tracking-body: -0.003em;
+  --pane-tracking-caps: 0.06em;
+
+  --pane-weight-regular: 400;
+  --pane-weight-medium: 500;
+  --pane-weight-semibold: 600;
+  --pane-weight-bold: 700;
+
+  --pane-measure: 68ch;              /* max line length for reading */
+
+  /* ---- Spacing (4px base) ---- */
+  --pane-space-1: 0.25rem;   /* 4 */
+  --pane-space-2: 0.5rem;    /* 8 */
+  --pane-space-3: 0.75rem;   /* 12 */
+  --pane-space-4: 1rem;      /* 16 */
+  --pane-space-5: 1.25rem;   /* 20 */
+  --pane-space-6: 1.5rem;    /* 24 */
+  --pane-space-8: 2rem;      /* 32 */
+  --pane-space-10: 2.5rem;   /* 40 */
+  --pane-space-12: 3rem;     /* 48 */
+  --pane-space-16: 4rem;     /* 64 */
+  --pane-space-20: 5rem;     /* 80 */
+  --pane-space-24: 6rem;     /* 96 */
+  --pane-space-32: 8rem;     /* 128 */
+  --pane-gutter: max(16px, env(safe-area-inset-left, 0px));
+  --pane-gutter-end: max(16px, env(safe-area-inset-right, 0px));
+  --pane-page-max: 1120px;
+
+  /* ---- Radii ---- */
+  /* Nested shapes stay concentric: inner = outer - padding. */
+  --pane-radius-xs: 6px;
+  --pane-radius-sm: 10px;
+  --pane-radius-md: 14px;
+  --pane-radius-lg: 20px;
+  --pane-radius-xl: 28px;
+  --pane-radius-pill: 999px;
+
+  /* ---- Shadows (light, layered, never harsh) ---- */
+  --pane-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06), 0 1px 1px rgba(0, 0, 0, 0.03);
+  --pane-shadow-md: 0 4px 14px rgba(0, 0, 0, 0.07), 0 1px 3px rgba(0, 0, 0, 0.05);
+  --pane-shadow-lg: 0 18px 50px rgba(0, 0, 0, 0.14), 0 4px 12px rgba(0, 0, 0, 0.06);
+  --pane-shadow-float: 0 10px 30px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.06);
+
+  /* ---- Motion ---- */
+  --pane-duration-fast: 120ms;
+  --pane-duration: 200ms;
+  --pane-duration-slow: 320ms;
+  --pane-ease: cubic-bezier(0.2, 0.8, 0.2, 1);       /* standard */
+  --pane-ease-out: cubic-bezier(0.16, 1, 0.3, 1);    /* entrances */
+  --pane-ease-spring: cubic-bezier(0.34, 1.36, 0.64, 1); /* small pops */
+  --pane-press-scale: 0.97;
+
+  /* ---- Sizing ---- */
+  --pane-control-h-sm: 32px;
+  --pane-control-h: 44px;          /* minimum touch target */
+  --pane-control-h-lg: 52px;
+  --pane-z-nav: 50;
+  --pane-z-float: 60;
+  --pane-z-dialog: 100;
+}
+
+/* ---- Dark theme ---------------------------------------------------------- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --pane-bg: #000000;
+    --pane-surface: #1c1c1e;
+    --pane-surface-2: #2c2c2e;
+    --pane-fill: rgba(120, 120, 128, 0.24);
+    --pane-fill-strong: rgba(120, 120, 128, 0.36);
+    --pane-separator: rgba(255, 255, 255, 0.14);
+    --pane-control-border: #7c7c80;
+    --pane-label: #f5f5f7;
+    --pane-label-2: #a1a1a6;
+    --pane-label-disabled: #6e6e73;
+    --pane-accent: #0071e3;
+    --pane-on-accent: #ffffff;
+    --pane-accent-text: #4aa8ff;
+    --pane-accent-tint: rgba(41, 151, 255, 0.16);
+    --pane-focus: #2997ff;
+    --pane-danger: #ff6961;
+    --pane-danger-tint: rgba(255, 105, 97, 0.16);
+    --pane-success: #30d158;
+    --pane-warning: #ffb340;
+    --pane-glass-tint: rgba(30, 30, 32, 0.68);
+    --pane-glass-edge: rgba(255, 255, 255, 0.12);
+    --pane-glass-rim: rgba(0, 0, 0, 0.5);
+    --pane-glass-opaque: #1c1c1e;
+    --pane-scrim: rgba(0, 0, 0, 0.55);
+    --pane-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --pane-shadow-md: 0 4px 14px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.4);
+    --pane-shadow-lg: 0 18px 50px rgba(0, 0, 0, 0.6), 0 4px 12px rgba(0, 0, 0, 0.4);
+    --pane-shadow-float: 0 10px 30px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.4);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --pane-bg: #000000;
+  --pane-surface: #1c1c1e;
+  --pane-surface-2: #2c2c2e;
+  --pane-fill: rgba(120, 120, 128, 0.24);
+  --pane-fill-strong: rgba(120, 120, 128, 0.36);
+  --pane-separator: rgba(255, 255, 255, 0.14);
+  --pane-control-border: #7c7c80;
+  --pane-label: #f5f5f7;
+  --pane-label-2: #a1a1a6;
+  --pane-label-disabled: #6e6e73;
+  --pane-accent: #0071e3;
+  --pane-on-accent: #ffffff;
+  --pane-accent-text: #4aa8ff;
+  --pane-accent-tint: rgba(41, 151, 255, 0.16);
+  --pane-focus: #2997ff;
+  --pane-danger: #ff6961;
+  --pane-danger-tint: rgba(255, 105, 97, 0.16);
+  --pane-success: #30d158;
+  --pane-warning: #ffb340;
+  --pane-glass-tint: rgba(30, 30, 32, 0.68);
+  --pane-glass-edge: rgba(255, 255, 255, 0.12);
+  --pane-glass-rim: rgba(0, 0, 0, 0.5);
+  --pane-glass-opaque: #1c1c1e;
+  --pane-scrim: rgba(0, 0, 0, 0.55);
+  --pane-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --pane-shadow-md: 0 4px 14px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.4);
+  --pane-shadow-lg: 0 18px 50px rgba(0, 0, 0, 0.6), 0 4px 12px rgba(0, 0, 0, 0.4);
+  --pane-shadow-float: 0 10px 30px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+/* ---- Increased contrast (macOS/iOS "Increase contrast", Windows HC) ------ */
+@media (prefers-contrast: more) {
+  :root {
+    --pane-label-2: #4a4a4f;
+    --pane-separator: rgba(0, 0, 0, 0.35);
+    --pane-control-border: #5e5e63;
+    --pane-glass-rim: rgba(0, 0, 0, 0.6);
+  }
+  :root[data-theme="dark"] {
+    --pane-label-2: #d1d1d6;
+    --pane-separator: rgba(255, 255, 255, 0.4);
+    --pane-control-border: #aeaeb2;
+    --pane-glass-rim: rgba(255, 255, 255, 0.6);
+  }
+}
+@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --pane-label-2: #d1d1d6;
+    --pane-separator: rgba(255, 255, 255, 0.4);
+    --pane-control-border: #aeaeb2;
+    --pane-glass-rim: rgba(255, 255, 255, 0.6);
+  }
+}
+
+/* ---- Reduced motion: keep fades, drop movement and scale ----------------- */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --pane-duration-fast: 1ms;
+    --pane-duration: 120ms;      /* opacity fades only, see components */
+    --pane-duration-slow: 120ms;
+    --pane-ease-spring: linear;
+    --pane-press-scale: 1;
+  }
+}

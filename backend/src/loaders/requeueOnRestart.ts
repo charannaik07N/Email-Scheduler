@@ -1,104 +1,127 @@
-import { supabaseServiceClient } from '../config/supabase';
-import { addEmailToQueue } from '../queues/emailQueue';
+import { randomUUID } from 'node:crypto';
+import { redisCommands } from '../config/redis';
+import { addEmailToQueue, getCompletedJobResult, JobActiveError } from '../queues/emailQueue';
+import * as EmailService from '../services/email.service';
 import { logger } from '../utils/logger';
 
+const REQUEUE_LOCK_KEY = 'email_requeue_lock';
+const REQUEUE_LOCK_TTL_SECONDS = 10 * 60;
+
+/** A completed job that reported a send: the email went out but SENT wasn't saved. */
+const wasSent = (result: unknown) =>
+  typeof result === 'object' && result !== null && (result as { success?: unknown }).success === true;
+
+// Only the holder may extend or release the lock (another process may hold it
+// after ours expired).
+const RELEASE_SCRIPT = `if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0`;
+const EXTEND_SCRIPT = `if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('EXPIRE', KEYS[1], ARGV[2]) end return 0`;
+
+type RequeueOutcome = 'done' | 'skipped' | 'unavailable';
+
 /**
- * Re-queue all pending/scheduled emails on server restart
- * This ensures emails are still sent after a restart
- * 
- * PERSISTENCE GUARANTEE:
- * - Emails are stored in PostgreSQL (Supabase)
- * - On restart, we scan for pending emails and re-add to BullMQ
- * - Idempotency keys prevent duplicate jobs
+ * Rebuild the queue from the database, in case Redis lost jobs.
+ *
+ * Every unsent email (SCHEDULED or RETRYING) is queued again under its own ID,
+ * so emails already in the queue are left alone. Emails whose time passed while
+ * the server was down are sent right away instead of being dropped. If the
+ * email's job already completed, it's never run again: a job that sent the
+ * email gets its row saved as SENT instead.
+ *
+ * Only one process runs this at a time (a Redis lock), so parallel starts don't
+ * remove and re-add each other's jobs. Returns 'unavailable' when Redis or the
+ * database couldn't be reached, so the caller can try again.
  */
-export const requeuePendingEmails = async (): Promise<void> => {
+export const requeuePendingEmails = async (): Promise<RequeueOutcome> => {
+  const token = `${process.pid}:${randomUUID()}`;
+  let locked: string | null;
   try {
-    logger.info('🔄 Checking for pending emails to requeue...');
+    locked = await redisCommands.set(REQUEUE_LOCK_KEY, token, 'EX', REQUEUE_LOCK_TTL_SECONDS, 'NX');
+  } catch (error) {
+    logger.error('❌ Could not reach Redis to requeue unsent emails:', (error as Error).message);
+    return 'unavailable';
+  }
+  if (locked !== 'OK') {
+    logger.info('ℹ️  Another process is requeueing unsent emails, skipping');
+    return 'skipped';
+  }
 
-    // Get all pending/scheduled emails from Supabase
-    const { data: pendingEmails, error } = await supabaseServiceClient
-      .from('emails')
-      .select('*')
-      .in('status', ['SCHEDULED', 'RETRYING'])
-      .gte('scheduled_at', new Date().toISOString())
-      .order('scheduled_at', { ascending: true });
+  const extendLock = () =>
+    redisCommands.eval(EXTEND_SCRIPT, 1, REQUEUE_LOCK_KEY, token, REQUEUE_LOCK_TTL_SECONDS).catch(() => undefined);
+  try {
+    return (await requeueAll(extendLock)) ? 'done' : 'unavailable';
+  } finally {
+    await redisCommands.eval(RELEASE_SCRIPT, 1, REQUEUE_LOCK_KEY, token).catch(() => undefined);
+  }
+};
 
-    if (error) {
-      // Table might not exist yet - that's okay
-      if (error.code === '42P01' || error.message?.includes('does not exist')) {
-        logger.info('ℹ️  Emails table not found, skipping requeue (run database migrations first)');
-        return;
-      }
-      logger.warn('⚠️  Failed to fetch pending emails:', error.message);
-      return;
-    }
+const FIRST_RETRY_MS = 5 * 1000;
+const MAX_RETRY_MS = 60 * 1000;
 
-    if (!pendingEmails || pendingEmails.length === 0) {
-      logger.info('✅ No pending emails to requeue');
-      return;
-    }
+/**
+ * Run the requeue at startup, and keep trying (5s, 10s, ... up to every minute)
+ * while Redis or the database is unreachable, so emails aren't stranded just
+ * because Redis came up after the server.
+ */
+export const requeuePendingEmailsWithRetry = async (): Promise<void> => {
+  let wait = FIRST_RETRY_MS;
+  for (;;) {
+    if ((await requeuePendingEmails()) !== 'unavailable') return;
+    logger.warn(`⏳ Will try requeueing unsent emails again in ${wait / 1000}s`);
+    await new Promise((resolve) => setTimeout(resolve, wait).unref());
+    wait = Math.min(wait * 2, MAX_RETRY_MS);
+  }
+};
 
-    logger.info(`📧 Found ${pendingEmails.length} pending emails to requeue`);
+/** Returns false if the emails couldn't be loaded (try again later). */
+const requeueAll = async (extendLock: () => Promise<unknown>): Promise<boolean> => {
+  logger.info('🔄 Checking for unsent emails to requeue...');
 
-    let requeuedCount = 0;
-    let skippedCount = 0;
+  let queued = 0;
+  let overdue = 0;
+  let repaired = 0;
+  let failed = 0;
+  const now = Date.now();
 
-    for (const email of pendingEmails) {
-      try {
-        // Check if email is still in the future
-        if (new Date(email.scheduled_at) < new Date()) {
-          logger.warn(
-            `⚠️  Skipping past email ${email.id} scheduled for ${email.scheduled_at}`
-          );
-          skippedCount++;
-          
-          // Update status to FAILED
-          await supabaseServiceClient
-            .from('emails')
-            .update({
-              status: 'FAILED',
-              error_message: 'Email scheduled time has passed during server restart',
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', email.id);
-          
-          continue;
-        }
-
-        // Add to queue with idempotency key
-        const jobId = await addEmailToQueue(
-          {
-            emailId: email.id,
-            senderId: email.sender_id,
-            recipientEmail: email.recipient_email,
-            recipientName: email.recipient_name || undefined,
-            subject: email.subject,
-            body: email.body,
-            htmlBody: email.html_body || undefined,
-            attemptCount: 0,
-          },
-          new Date(email.scheduled_at),
-          email.idempotency_key || email.id
-        );
-
-        requeuedCount++;
-        logger.info(`✅ Requeued email ${email.id} with job ${jobId}`);
-      } catch (error: any) {
-        // If job already exists (duplicate), just log and continue
-        if (error.message?.includes('already exists')) {
-          logger.info(`ℹ️  Email ${email.id} already in queue, skipping`);
-          skippedCount++;
-        } else {
+  try {
+    for await (const page of EmailService.getPendingEmails()) {
+      await extendLock(); // a large backlog can take longer than the lock's TTL
+      for (const email of page) {
+        try {
+          const scheduledAt = new Date(email.scheduledAt);
+          const result = await addEmailToQueue(email.id, scheduledAt);
+          if (result !== 'completed') {
+            queued++;
+            if (scheduledAt.getTime() < now) overdue++;
+            continue;
+          }
+          const jobResult = await getCompletedJobResult(email.id);
+          if (wasSent(jobResult)) {
+            const updated = await EmailService.updateEmailIfStatus(email.id, EmailService.PENDING_STATUSES, {
+              status: 'SENT',
+              sentAt: email.sentAt || new Date().toISOString(),
+              errorMessage: null,
+            });
+            if (updated) repaired++;
+          } else {
+            logger.warn(`⚠️  Email ${email.id} is unsent but its job already finished; leaving it for review`);
+          }
+        } catch (error) {
+          if (error instanceof JobActiveError) {
+            queued++; // a worker is sending it right now
+            continue;
+          }
+          failed++;
           logger.error(`❌ Failed to requeue email ${email.id}:`, error);
         }
       }
     }
-
-    logger.info(
-      `✅ Requeue complete: ${requeuedCount} requeued, ${skippedCount} skipped`
-    );
   } catch (error) {
-    logger.error('❌ Failed to requeue pending emails:', error);
-    // Don't throw - we don't want to prevent server startup
+    logger.error('❌ Failed to load unsent emails for requeue:', error);
+    return false;
   }
+
+  logger.info(
+    `✅ Requeue complete: ${queued} queued (${overdue} overdue, sending now), ${repaired} already sent and saved, ${failed} failed`
+  );
+  return true;
 };

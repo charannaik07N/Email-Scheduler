@@ -1,145 +1,107 @@
-import { createContext, useContext, useEffect, useState } from "react";
-import type { ReactNode } from "react";
-import { jwtDecode } from "jwt-decode";
-import axios from "axios";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
+import axios from 'axios';
+import { jwtDecode } from 'jwt-decode';
+import { googleLogout } from '@react-oauth/google';
+import { API_BASE_URL } from '../config';
+import { apiClient, AUTH_TOKEN_KEY } from '../services/api.service';
 
 interface User {
-  id?: string;
+  id: string;
   name: string;
   email: string;
   picture?: string;
-  sub?: string;
-  iat?: number;
-  exp?: number;
 }
 
 interface AuthContextType {
   user: User | null;
   loginWithGoogle: (credential: string) => Promise<void>;
-  loginWithEmail: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  register: (email: string, password: string, name: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   isLoading: boolean;
 }
 
+const USER_KEY = 'user';
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
-
-export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-
-  // Restore login on refresh
-  useEffect(() => {
-    const storedUser = localStorage.getItem("user");
-    const authToken = localStorage.getItem("authToken");
-    if (storedUser && authToken) {
-      setUser(JSON.parse(storedUser));
-    }
-    setIsLoading(false);
-  }, []);
-
-  const loginWithGoogle = async (credential: string) => {
-    try {
-      // Decode Google JWT to get user info
-      const decoded = jwtDecode<User>(credential);
-      
-      // Send to backend for authentication
-      const response = await axios.post(`${API_BASE_URL}/auth/google-login`, {
-        googleToken: credential,
-        email: decoded.email,
-        name: decoded.name,
-        picture: decoded.picture,
-      });
-
-      if (response.data.token) {
-        const userData: User = {
-          id: response.data.user?.id,
-          name: decoded.name,
-          email: decoded.email,
-          picture: decoded.picture,
-        };
-        localStorage.setItem("authToken", response.data.token);
-        localStorage.setItem("user", JSON.stringify(userData));
-        setUser(userData);
-      }
-    } catch (error) {
-      console.error("Google login failed:", error);
-      throw error;
-    }
-  };
-
-  const loginWithEmail = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
-    try {
-      const response = await axios.post(`${API_BASE_URL}/auth/login`, {
-        email,
-        password,
-      });
-
-      if (response.data.token) {
-        const userData: User = {
-          id: response.data.user?.id,
-          name: response.data.user?.name || email.split('@')[0],
-          email: response.data.user?.email || email,
-          picture: undefined,
-        };
-        localStorage.setItem("authToken", response.data.token);
-        localStorage.setItem("user", JSON.stringify(userData));
-        setUser(userData);
-        return { success: true };
-      }
-      return { success: false, error: 'Login failed' };
-    } catch (error: any) {
-      console.error("Email login failed:", error);
-      return { success: false, error: error.response?.data?.error || 'Login failed' };
-    }
-  };
-
-  const register = async (email: string, password: string, name: string): Promise<{ success: boolean; error?: string }> => {
-    try {
-      const response = await axios.post(`${API_BASE_URL}/auth/register`, {
-        email,
-        password,
-        name,
-      });
-
-      if (response.data.token) {
-        const userData: User = {
-          id: response.data.user?.id,
-          name: response.data.user?.name || name,
-          email: response.data.user?.email || email,
-          picture: undefined,
-        };
-        localStorage.setItem("authToken", response.data.token);
-        localStorage.setItem("user", JSON.stringify(userData));
-        setUser(userData);
-        return { success: true };
-      }
-      return { success: false, error: 'Registration failed' };
-    } catch (error: any) {
-      console.error("Registration failed:", error);
-      return { success: false, error: error.response?.data?.error || 'Registration failed' };
-    }
-  };
-
-  const logout = () => {
-    localStorage.removeItem("user");
-    localStorage.removeItem("authToken");
-    setUser(null);
-  };
-
-  return (
-    <AuthContext.Provider value={{ user, loginWithGoogle, loginWithEmail, register, logout, isLoading }}>
-      {children}
-    </AuthContext.Provider>
-  );
+const clearStoredSession = () => {
+  localStorage.removeItem(USER_KEY);
+  localStorage.removeItem(AUTH_TOKEN_KEY);
 };
 
+/**
+ * Read the saved session synchronously, so the first render already knows
+ * whether the user is signed in (no flash of the login page on refresh).
+ * A corrupted or expired session is discarded.
+ */
+const loadStoredUser = (): User | null => {
+  const storedUser = localStorage.getItem(USER_KEY);
+  const token = localStorage.getItem(AUTH_TOKEN_KEY);
+  if (!storedUser || !token) return null;
+
+  try {
+    const { exp } = jwtDecode<{ exp?: number }>(token);
+    if (exp && exp * 1000 <= Date.now()) {
+      clearStoredSession();
+      return null;
+    }
+    return JSON.parse(storedUser) as User;
+  } catch {
+    clearStoredSession();
+    return null;
+  }
+};
+
+export const AuthProvider = ({ children }: { children: ReactNode }) => {
+  const [user, setUser] = useState<User | null>(loadStoredUser);
+
+  const logout = useCallback(() => {
+    clearStoredSession();
+    googleLogout();
+    setUser(null);
+  }, []);
+
+  // Any 401 from the API signs the user out; RequireAuth then shows the login page.
+  useEffect(() => {
+    apiClient.setUnauthorizedHandler(logout);
+    return () => apiClient.setUnauthorizedHandler(null);
+  }, [logout]);
+
+  const loginWithGoogle = useCallback(async (credential: string) => {
+    // The backend verifies the credential and reads the identity from it.
+    const response = await axios.post(`${API_BASE_URL}/auth/google-login`, {
+      googleToken: credential,
+    });
+
+    const { token, user: account } = response.data ?? {};
+    if (!token || !account) {
+      throw new Error('The server did not return a session');
+    }
+
+    const userData: User = {
+      id: account.id,
+      name: account.name || account.email,
+      email: account.email,
+      picture: account.picture,
+    };
+    localStorage.setItem(AUTH_TOKEN_KEY, token);
+    localStorage.setItem(USER_KEY, JSON.stringify(userData));
+    setUser(userData);
+  }, []);
+
+  const value = useMemo(
+    () => ({ user, loginWithGoogle, logout, isLoading: false }),
+    [user, loginWithGoogle, logout]
+  );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+};
+
+// eslint-disable-next-line react-refresh/only-export-components
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === undefined) {
-    throw new Error("useAuth must be used within an AuthProvider");
+    throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
 };

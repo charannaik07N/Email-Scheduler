@@ -1,47 +1,49 @@
 import { apiClient } from './api.service';
 import type {
-  EmailData,
-  ScheduledEmail,
-  SentEmail,
-  EmailStats,
   ApiResponse,
+  BulkScheduleRequest,
+  BulkScheduleResult,
+  Email,
+  EmailStats,
   PaginatedResponse,
+  Sender,
 } from '../types';
 
+export const PAGE_SIZE = 50;
+
 export const emailService = {
-  // Schedule new email
-  async scheduleEmail(data: EmailData): Promise<ApiResponse<{ jobId: string }>> {
-    return apiClient.post('/emails/schedule', data);
+  /** Scheduled = waiting to send, including emails waiting for a retry. Soonest first. */
+  getScheduledEmails(page = 1, signal?: AbortSignal): Promise<ApiResponse<PaginatedResponse<Email>>> {
+    return apiClient.get('/emails', { status: 'SCHEDULED,RETRYING', page, limit: PAGE_SIZE, order: 'asc' }, signal);
   },
 
-  // Get scheduled emails (using status filter)
-  async getScheduledEmails(
-    page = 1,
-    pageSize = 50
-  ): Promise<ApiResponse<PaginatedResponse<ScheduledEmail>>> {
-    return apiClient.get('/emails', { status: 'SCHEDULED,RETRYING', page, limit: pageSize });
+  getSentEmails(page = 1, signal?: AbortSignal): Promise<ApiResponse<PaginatedResponse<Email>>> {
+    return apiClient.get('/emails', { status: 'SENT', page, limit: PAGE_SIZE }, signal);
   },
 
-  // Get sent emails (using status filter)
-  async getSentEmails(
-    page = 1,
-    pageSize = 50
-  ): Promise<ApiResponse<PaginatedResponse<SentEmail>>> {
-    return apiClient.get('/emails', { status: 'SENT,FAILED', page, limit: pageSize });
+  /** Emails that gave up after all attempts; they can be retried. */
+  getFailedEmails(page = 1, signal?: AbortSignal): Promise<ApiResponse<PaginatedResponse<Email>>> {
+    return apiClient.get('/emails', { status: 'FAILED', page, limit: PAGE_SIZE }, signal);
   },
 
-  // Get email statistics
-  async getEmailStats(): Promise<ApiResponse<EmailStats>> {
-    return apiClient.get('/emails/stats');
+  /** Sends the browser's timezone so "pending today" means the user's today. */
+  getEmailStats(signal?: AbortSignal): Promise<ApiResponse<EmailStats>> {
+    return apiClient.get('/emails/stats', { tzOffset: new Date().getTimezoneOffset() }, signal);
   },
 
-  // Cancel scheduled email
-  async cancelScheduledEmail(emailId: string): Promise<ApiResponse<void>> {
+  getSenders(): Promise<ApiResponse<{ senders: Sender[] }>> {
+    return apiClient.get('/emails/senders');
+  },
+
+  scheduleBulk(request: BulkScheduleRequest): Promise<ApiResponse<BulkScheduleResult>> {
+    return apiClient.post('/emails/schedule/bulk', request);
+  },
+
+  cancelScheduledEmail(emailId: string): Promise<ApiResponse<void>> {
     return apiClient.delete(`/emails/${emailId}`);
   },
 
-  // Retry failed email
-  async retryFailedEmail(emailId: string): Promise<ApiResponse<void>> {
+  retryFailedEmail(emailId: string): Promise<ApiResponse<{ email: Email }>> {
     return apiClient.post(`/emails/${emailId}/retry`);
   },
 };

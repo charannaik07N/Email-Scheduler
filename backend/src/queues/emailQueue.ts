@@ -2,143 +2,118 @@ import { Queue } from 'bullmq';
 import redis from '../config/redis';
 import { logger } from '../utils/logger';
 
+export const EMAIL_QUEUE_NAME = 'email-queue';
+
+/**
+ * Job payload: only the email's ID. The worker reads everything else from the
+ * row, which stays the source of truth (a cancelled or already-sent email is
+ * skipped), and Redis doesn't hold a copy of every message body.
+ */
 export interface EmailJobData {
   emailId: string;
-  senderId: string;
-  recipientEmail: string;
-  recipientName?: string;
-  subject: string;
-  body: string;
-  htmlBody?: string;
-  attemptCount: number;
 }
 
-// BullMQ Queue Configuration
-export const emailQueue = new Queue<EmailJobData>('email-queue', {
+export const EMAIL_JOB_ATTEMPTS = 3;
+
+/** The email's job is being processed right now, so it can't be replaced or removed. */
+export class JobActiveError extends Error {
+  constructor(emailId: string) {
+    super(`Email ${emailId} is being processed right now`);
+  }
+}
+
+export const emailQueue = new Queue<EmailJobData>(EMAIL_QUEUE_NAME, {
   connection: redis,
   defaultJobOptions: {
-    attempts: 3,
-    backoff: {
-      type: 'exponential',
-      delay: 2000,
-    },
-    removeOnComplete: {
-      age: 24 * 3600, // Keep completed jobs for 24 hours
-      count: 1000,
-    },
-    removeOnFail: {
-      age: 7 * 24 * 3600, // Keep failed jobs for 7 days
-    },
+    attempts: EMAIL_JOB_ATTEMPTS,
+    backoff: { type: 'exponential', delay: 2000 },
+    removeOnComplete: { age: 24 * 3600, count: 1000 },
+    removeOnFail: { age: 7 * 24 * 3600 },
   },
 });
 
-// Queue event listeners
 emailQueue.on('error', (error) => {
   logger.error('❌ Email queue error:', error);
 });
 
-emailQueue.on('waiting', (jobId) => {
-  logger.info(`⏳ Job ${jobId} is waiting`);
-});
-
-emailQueue.on('active' as any, (job: any) => {
-  logger.info(`🔄 Job ${job.id} is now active`);
-});
-
-emailQueue.on('completed' as any, (job: any) => {
-  logger.info(`✅ Job ${job.id} completed successfully`);
-});
-
-emailQueue.on('failed' as any, (job: any, error: any) => {
-  logger.error(`❌ Job ${job?.id} failed:`, error);
-});
+export type AddJobResult = 'queued' | 'already-queued' | 'completed';
 
 /**
- * Add an email to the queue with delay
- * @param emailData - Email job data
- * @param scheduledAt - When to send the email
- * @param idempotencyKey - Unique key to prevent duplicate jobs
+ * Queue an email to be sent at `scheduledAt` (immediately if that's in the past).
+ *
+ * The job ID is always the email ID, so the same email can never be queued
+ * twice. A failed job kept by BullMQ is replaced, so the email runs again (its
+ * send lock still stops a second send). A completed job is left alone and
+ * 'completed' is returned: it may have sent the email without saving SENT, and
+ * running it again could send twice. Only an explicit retry of a FAILED email
+ * passes `replaceCompleted`.
  */
 export const addEmailToQueue = async (
-  emailData: EmailJobData,
+  emailId: string,
   scheduledAt: Date,
-  idempotencyKey?: string
-): Promise<string> => {
-  try {
-    const delay = Math.max(0, new Date(scheduledAt).getTime() - Date.now());
-    
-    const job = await emailQueue.add(
-      'send-email',
-      emailData,
-      {
-        delay,
-        jobId: idempotencyKey, // Use idempotency key as job ID to prevent duplicates
-        priority: 1,
+  { replaceCompleted = false }: { replaceCompleted?: boolean } = {}
+): Promise<AddJobResult> => {
+  const existing = await emailQueue.getJob(emailId);
+  if (existing) {
+    const state = await existing.getState();
+    if (state === 'active') throw new JobActiveError(emailId);
+    if (state === 'completed' && !replaceCompleted) return 'completed';
+    if (state === 'completed' || state === 'failed') {
+      try {
+        await existing.remove();
+      } catch (error) {
+        if ((await existing.getState()) === 'active') throw new JobActiveError(emailId);
+        throw error;
       }
-    );
-
-    logger.info(`📧 Email job added to queue: ${job.id} with delay ${delay}ms`);
-    return job.id as string;
-  } catch (error) {
-    logger.error('❌ Failed to add email to queue:', error);
-    throw error;
-  }
-};
-
-/**
- * Remove a job from the queue
- */
-export const removeEmailFromQueue = async (jobId: string): Promise<void> => {
-  try {
-    const job = await emailQueue.getJob(jobId);
-    if (job) {
-      await job.remove();
-      logger.info(`🗑️  Job ${jobId} removed from queue`);
+    } else if (state !== 'unknown') {
+      logger.info(`ℹ️  Email ${emailId} already queued (${state})`);
+      return 'already-queued';
     }
-  } catch (error) {
-    logger.error(`❌ Failed to remove job ${jobId}:`, error);
-    throw error;
   }
+
+  const delay = Math.max(0, scheduledAt.getTime() - Date.now());
+  // Adding with an existing ID is a no-op in BullMQ, so a job another process
+  // added in the meantime is kept rather than duplicated.
+  await emailQueue.add('send-email', { emailId }, { delay, jobId: emailId });
+  logger.info(`📧 Email job ${emailId} queued with delay ${delay}ms`);
+  return 'queued';
 };
 
+/** What a completed job returned, or undefined if there is no completed job. */
+export const getCompletedJobResult = async (emailId: string): Promise<unknown> => {
+  const job = await emailQueue.getJob(emailId);
+  if (!job || (await job.getState()) !== 'completed') return undefined;
+  return job.returnvalue ?? null;
+};
+
+export type RemoveJobResult = 'removed' | 'not_found' | 'active' | 'completed';
+
 /**
- * Get queue metrics
+ * Remove an email's waiting job. Returns 'active' if a worker is sending it
+ * right now and 'completed' if the job already finished (the email was most
+ * likely sent); neither is removed.
  */
-export const getQueueMetrics = async () => {
+export const removeEmailFromQueue = async (emailId: string): Promise<RemoveJobResult> => {
+  const job = await emailQueue.getJob(emailId);
+  if (!job) return 'not_found';
+  const state = await job.getState();
+  if (state === 'active') return 'active';
+  if (state === 'completed') return 'completed';
+
   try {
-    const [waiting, active, completed, failed, delayed] = await Promise.all([
-      emailQueue.getWaitingCount(),
-      emailQueue.getActiveCount(),
-      emailQueue.getCompletedCount(),
-      emailQueue.getFailedCount(),
-      emailQueue.getDelayedCount(),
-    ]);
-
-    return {
-      waiting,
-      active,
-      completed,
-      failed,
-      delayed,
-      total: waiting + active + delayed,
-    };
+    await job.remove();
   } catch (error) {
-    logger.error('❌ Failed to get queue metrics:', error);
+    // It became active between the check and the removal.
+    if ((await job.getState()) === 'active') return 'active';
     throw error;
   }
+  logger.info(`🗑️  Job ${emailId} removed from queue`);
+  return 'removed';
 };
 
-/**
- * Graceful shutdown
- */
 export const closeQueue = async (): Promise<void> => {
-  try {
-    await emailQueue.close();
-    logger.info('✅ Email queue closed successfully');
-  } catch (error) {
-    logger.error('❌ Failed to close email queue:', error);
-    throw error;
-  }
+  await emailQueue.close();
+  logger.info('✅ Email queue closed');
 };
 
 export default emailQueue;

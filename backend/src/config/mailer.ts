@@ -9,6 +9,8 @@ export interface MailConfig {
     user: string;
     pass: string;
   };
+  /** When host is an already-resolved IP, the real host name for TLS certificate checks. */
+  tls?: { servername: string };
 }
 
 export interface EmailOptions {
@@ -19,31 +21,42 @@ export interface EmailOptions {
   html?: string;
 }
 
+/**
+ * Port 465 uses implicit TLS; other ports (587, 25) upgrade with STARTTLS.
+ * Pass `servername` when `host` is an IP resolved from that name, so the
+ * connection goes to the checked address and TLS still verifies the name.
+ */
+export const buildMailConfig = (
+  host: string,
+  port: number,
+  user: string,
+  pass: string,
+  servername?: string
+): MailConfig => ({
+  host,
+  port,
+  secure: port === 465,
+  auth: { user, pass },
+  ...(servername && servername !== host ? { tls: { servername } } : {}),
+});
 
-const defaultMailConfig: MailConfig = {
-  host: process.env.SMTP_HOST || 'smtp.ethereal.email',
-  port: parseInt(process.env.SMTP_PORT || '587'),
-  secure: false, // true for 465, false for other ports
-  auth: {
-    user: process.env.ETHEREAL_USER || '',
-    pass: process.env.ETHEREAL_PASS || '',
-  },
+/** The server's shared SMTP account. */
+export const SHARED_SMTP_HOST = process.env.SMTP_HOST || 'smtp.ethereal.email';
+export const SHARED_SMTP_USER = process.env.ETHEREAL_USER || '';
+
+const defaultMailConfig = buildMailConfig(
+  SHARED_SMTP_HOST,
+  parseInt(process.env.SMTP_PORT || '587', 10),
+  SHARED_SMTP_USER,
+  process.env.ETHEREAL_PASS || ''
+);
+
+export const createMailTransporter = (config: MailConfig = defaultMailConfig): Transporter => {
+  logger.info(`📧 Mail transporter created for ${config.host}:${config.port}`);
+  return nodemailer.createTransport(config);
 };
-
-
-export const createMailTransporter = (config?: MailConfig): Transporter => {
-  const mailConfig = config || defaultMailConfig;
-  
-  const transporter = nodemailer.createTransport(mailConfig);
-  
-  logger.info(`📧 Mail transporter created for ${mailConfig.host}`);
-  
-  return transporter;
-};
-
 
 export const defaultTransporter = createMailTransporter();
-
 
 export const verifyMailConnection = async (transporter: Transporter): Promise<boolean> => {
   try {
@@ -60,18 +73,13 @@ export const sendEmail = async (
   options: EmailOptions,
   transporter: Transporter = defaultTransporter
 ): Promise<any> => {
-  try {
-    const info = await transporter.sendMail(options);
-    logger.info(`✅ Email sent successfully: ${info.messageId}`);
-    
-    
-    if (process.env.SMTP_HOST === 'smtp.ethereal.email') {
-      logger.info(`📧 Preview URL: ${nodemailer.getTestMessageUrl(info)}`);
-    }
-    
-    return info;
-  } catch (error) {
-    logger.error('❌ Failed to send email:', error);
-    throw error;
+  const info = await transporter.sendMail(options);
+  logger.info(`✅ Email sent: ${info.messageId}`);
+
+  const previewUrl = nodemailer.getTestMessageUrl(info);
+  if (previewUrl) {
+    logger.info(`📧 Preview URL: ${previewUrl}`);
   }
+
+  return info;
 };

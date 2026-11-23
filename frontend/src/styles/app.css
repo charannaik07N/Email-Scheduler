@@ -1,0 +1,605 @@
+/* App-specific pieces built from Pane tokens only (no color literals). */
+
+/* ---- Page frame ---------------------------------------------------------- */
+.app-main {
+  padding-block: var(--pane-space-8) var(--pane-space-16);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pane-space-6);
+}
+.app-main--narrow { max-width: 760px; }
+/* ---- Nav bar contents ---------------------------------------------------- */
+.app-brand-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--pane-radius-sm);
+  background: var(--pane-accent);
+  color: var(--pane-on-accent);
+}
+.app-brand-mark svg { width: 16px; height: 16px; }
+.app-nav-actions { display: flex; align-items: center; gap: var(--pane-space-2); }
+.app-nav-title {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  font-size: var(--pane-text-body);
+  font-weight: var(--pane-weight-semibold);
+  pointer-events: none;
+}
+.app-account {
+  display: flex;
+  align-items: center;
+  gap: var(--pane-space-2);
+  min-width: 0;
+}
+.app-account__name {
+  font-size: var(--pane-text-subhead);
+  font-weight: var(--pane-weight-medium);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 720px) {
+  .app-account__name, .app-hide-narrow { display: none; }
+}
+
+.app-avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--pane-fill-strong);
+  color: var(--pane-label);
+  font-size: var(--pane-text-footnote);
+  font-weight: var(--pane-weight-semibold);
+  object-fit: cover;
+}
+.app-avatar--lg { width: 40px; height: 40px; font-size: var(--pane-text-subhead); }
+
+/* ---- Notices ------------------------------------------------------------- */
+.app-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--pane-space-3);
+  padding: var(--pane-space-3) var(--pane-space-4);
+  border-radius: var(--pane-radius-md);
+  font-size: var(--pane-text-subhead);
+  line-height: var(--pane-leading-snug);
+}
+.app-notice svg { width: 18px; height: 18px; flex: none; margin-top: 1px; }
+.app-notice p { margin: 0; flex: 1; }
+.app-notice--error { background: var(--pane-danger-tint); color: var(--pane-danger); }
+.app-notice--success { background: var(--app-success-tint); color: var(--app-success-text); }
+
+.app-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--pane-space-2);
+  padding: var(--pane-space-16) var(--pane-space-6);
+  text-align: center;
+}
+.app-empty svg { width: 40px; height: 40px; color: var(--pane-label-2); margin-bottom: var(--pane-space-2); }
+.app-empty p { margin: 0; }
+.app-empty .pane-btn { margin-top: var(--pane-space-3); }
+
+.app-center { display: flex; justify-content: center; padding: var(--pane-space-6); }
+
+/* ---- Status badges (icon + text, never color alone) --------------------- */
+.app-badge svg { width: 12px; height: 12px; }
+.app-badge--success { background: var(--app-success-tint); color: var(--app-success-text); }
+.app-badge--warning { background: var(--app-warning-tint); color: var(--app-warning-text); }
+.app-badge--danger { background: var(--pane-danger-tint); color: var(--pane-danger); }
+
+.app-meta { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--pane-space-2) var(--pane-space-4); margin: 0; font-size: var(--pane-text-subhead); }
+.app-meta dt { color: var(--pane-label-2); }
+.app-meta dd { margin: 0; overflow-wrap: anywhere; }
+.app-body { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* ---- Composer ------------------------------------------------------------ */
+.app-form-card { padding: var(--pane-space-6); display: flex; flex-direction: column; gap: var(--pane-space-5); }
+.app-form-card h2 { margin: 0; }
+.app-grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--pane-space-4); }
+@media (max-width: 600px) { .app-grid-2 { grid-template-columns: 1fr; } }
+
+/* A field that looks like a .pane-input but holds recipient chips. */
+.app-chip-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--pane-space-2);
+  min-height: var(--pane-control-h);
+  padding: 6px var(--pane-space-3);
+  border: 1px solid var(--pane-control-border);
+  border-radius: var(--pane-radius-md);
+  background: var(--pane-surface);
+  cursor: text;
+  transition: border-color var(--pane-duration) var(--pane-ease), box-shadow var(--pane-duration) var(--pane-ease);
+}
+/* A long list scrolls inside the field instead of pushing the rest of the form away. */
+.app-chip-field { max-height: 12.5rem; overflow-y: auto; overscroll-behavior: contain; }
+.app-chip-field:hover { border-color: var(--pane-label-2); }
+.app-chip-field:focus-within { border-color: var(--pane-focus); box-shadow: 0 0 0 3px var(--pane-accent-tint); }
+.app-chip-field input {
+  flex: 1 1 160px;
+  min-width: 0;
+  min-height: 30px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--pane-label);
+  font: inherit;
+  font-size: var(--pane-text-body);
+}
+.app-chip-field input::placeholder { color: var(--pane-label-2); opacity: 1; }
+.app-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  padding: 2px 4px 2px 10px;
+  border-radius: var(--pane-radius-pill);
+  background: var(--pane-accent-tint);
+  color: var(--pane-accent-text);
+  font-size: var(--pane-text-subhead);
+}
+.app-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-chip button {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.app-chip button:hover { background: var(--pane-accent-tint); }
+/* The circle stays small; the area that takes the tap is 36 x 44. */
+.app-chip button::after { content: ""; position: absolute; inset: -10px -6px; }
+.app-chip-field:has(input[aria-invalid="true"]) { border-color: var(--pane-danger); }
+.app-chip button svg { width: 14px; height: 14px; }
+
+.app-editor {
+  border: 1px solid var(--pane-control-border);
+  border-radius: var(--pane-radius-md);
+  background: var(--pane-surface);
+  overflow: hidden;
+  transition: border-color var(--pane-duration) var(--pane-ease), box-shadow var(--pane-duration) var(--pane-ease);
+}
+.app-editor:focus-within { border-color: var(--pane-focus); box-shadow: 0 0 0 3px var(--pane-accent-tint); }
+.app-editor .pane-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  border-radius: 0;
+  padding: var(--pane-space-1) var(--pane-space-2);
+  border-bottom: 1px solid var(--pane-separator);
+  background: var(--pane-surface-2);
+}
+.app-editor .pane-toolbar__btn { width: 44px; height: 44px; border-radius: var(--pane-radius-sm); }
+.app-editor .pane-toolbar__sep { margin: 0 2px; }
+.app-editor .pane-toolbar__btn svg { width: 18px; height: 18px; }
+.app-editor .pane-select {
+  width: auto;
+  min-height: 44px;
+  padding-block: 0;
+  border-color: transparent;
+  background-color: transparent;
+  font-size: var(--pane-text-subhead);
+}
+.app-editor__area {
+  position: relative;
+  min-height: 280px;
+  padding: var(--pane-space-4);
+  outline: none;
+  line-height: var(--pane-leading-body);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.app-editor__area:empty::before {
+  content: attr(data-placeholder);
+  color: var(--pane-label-2);
+  pointer-events: none;
+}
+.app-editor__area h1 { font-size: var(--pane-text-title-1); line-height: var(--pane-leading-snug); margin: 0.4em 0; }
+.app-editor__area h2 { font-size: var(--pane-text-title-2); line-height: var(--pane-leading-snug); margin: 0.4em 0; }
+.app-editor__area blockquote { margin: 0.5em 0; padding-left: var(--pane-space-4); border-left: 3px solid var(--pane-separator); color: var(--pane-label-2); }
+.app-editor__area ul { list-style: disc; padding-left: 1.5em; }
+.app-editor__area ol { list-style: decimal; padding-left: 1.5em; }
+.app-editor__area a { color: var(--pane-accent-text); text-decoration: underline; }
+.app-editor__area hr { border: 0; border-top: 1px solid var(--pane-separator); margin: 1em 0; }
+
+.app-quick { display: flex; flex-wrap: wrap; gap: var(--pane-space-2); }
+.app-summary { margin: 0; font-size: var(--pane-text-footnote); color: var(--pane-label-2); }
+
+/* Compose: the send plan on the same rail as the Scheduled timeline, one row per clock hour. */
+/* Two classes: must beat the base .app-timeline rule further down. */
+.app-timeline.app-timeline--plan { --tl-pad: 0px; padding: 0; }
+.app-timeline--plan .app-timeline__day { padding-top: var(--pane-space-2); font-size: var(--pane-text-footnote); color: var(--pane-label-2); }
+.app-plan-row { padding-block: var(--pane-space-1); }
+.app-plan-row__text { font-size: var(--pane-text-subhead); }
+.app-plan-row__text small { display: block; font-size: var(--pane-text-footnote); color: var(--pane-label-2); }
+.app-plan-more { padding-block: var(--pane-space-1); font-size: var(--pane-text-footnote); color: var(--pane-label-2); }
+
+/* ---- Login --------------------------------------------------------------- */
+.app-login {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: var(--pane-space-6) var(--pane-gutter);
+}
+.app-login__panel {
+  width: min(420px, 100%);
+  padding: var(--pane-space-12) var(--pane-space-8) var(--pane-space-8);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--pane-space-4);
+  text-align: center;
+}
+.app-login__panel h1 { margin: 0; }
+.app-login__panel p { margin: 0; }
+.app-login__mark {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: var(--pane-radius-lg);
+  background: var(--pane-accent);
+  color: var(--pane-on-accent);
+  margin-bottom: var(--pane-space-2);
+}
+.app-login__mark svg { width: 32px; height: 32px; }
+.app-login__google { min-height: 44px; display: flex; justify-content: center; margin-top: var(--pane-space-4); }
+.app-login__error { justify-content: center; text-align: left; }
+
+/* ---- Semantic tints for status (light, dark OS, dark forced) ------------
+   Measured (WCAG): light success text 5.39:1 on its tint over surface, 4.97:1
+   over bg; warning 5.14:1; dark success 6.21:1, warning 6.79:1. */
+:root {
+  /* Slightly darker than --pane-success so it passes 4.5:1 on the tint over bg. */
+  --app-success-text: #1b7032;
+  --app-success-tint: rgba(31, 122, 55, 0.1);
+  --app-warning-text: var(--pane-warning);
+  --app-warning-tint: rgba(163, 74, 0, 0.1);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --app-success-text: var(--pane-success);
+    --app-success-tint: rgba(48, 209, 88, 0.16);
+    --app-warning-tint: rgba(255, 179, 64, 0.16);
+  }
+}
+:root[data-theme="dark"] {
+  --app-success-text: var(--pane-success);
+  --app-success-tint: rgba(48, 209, 88, 0.16);
+  --app-warning-tint: rgba(255, 179, 64, 0.16);
+}
+
+.app-spinner-lg { display: inline-block; font-size: 28px; color: var(--pane-label-2); }
+.pane-btn .pane-spinner { display: inline-block; }
+
+/* ---- Mailbox: sidebar | list | detail, like Mail ------------------------
+   Wide (>= 1080px): three columns, each scrolls on its own.
+   Split (720-1079px): sidebar + one column that shows the list or the email.
+   Phone (< 720px): one column; the sidebar becomes a row of folder pills. */
+.app-nav-fluid { max-width: none; }
+
+.app-shell {
+  --app-nav-h: 57px;
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  height: calc(100dvh - var(--app-nav-h));
+}
+
+/* Sidebar */
+.app-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pane-space-4);
+  padding: var(--pane-space-4) var(--pane-space-3);
+  border-right: 1px solid var(--pane-separator);
+  overflow-y: auto;
+}
+.app-sidebar__compose { width: 100%; }
+.app-folders { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.app-folder {
+  display: flex;
+  align-items: center;
+  gap: var(--pane-space-3);
+  width: 100%;
+  min-height: 44px;
+  padding: 0 var(--pane-space-3);
+  border: 0;
+  border-radius: var(--pane-radius-sm);
+  background: transparent;
+  color: var(--pane-label);
+  font: inherit;
+  font-size: var(--pane-text-subhead);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--pane-duration-fast) var(--pane-ease);
+}
+.app-folder svg { width: 18px; height: 18px; flex: none; color: var(--pane-accent-text); }
+.app-folder:hover { background: var(--pane-fill); }
+.app-folder[aria-current="page"] { background: var(--pane-fill-strong); font-weight: var(--pane-weight-semibold); }
+.app-folder:focus-visible { outline-offset: -2px; }
+.app-folder__label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-folder__count { color: var(--pane-label-2); font-size: var(--pane-text-footnote); font-variant-numeric: tabular-nums; }
+.app-sidebar__today {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--pane-space-2);
+  margin: auto 0 0;
+  padding: var(--pane-space-3);
+  border-radius: var(--pane-radius-sm);
+  background: var(--pane-surface);
+  color: var(--pane-label-2);
+  font-size: var(--pane-text-footnote);
+  line-height: var(--pane-leading-snug);
+}
+.app-sidebar__today svg { width: 16px; height: 16px; flex: none; color: var(--app-warning-text); }
+
+/* List and detail columns */
+.app-panes { display: grid; grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); min-height: 0; }
+.app-panes:focus { outline: none; }
+.app-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.app-pane--list { border-right: 1px solid var(--pane-separator); background: var(--pane-surface); }
+.app-pane--detail { background: var(--pane-surface); overflow-y: auto; }
+.app-pane__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pane-space-3);
+  padding: var(--pane-space-4) var(--pane-space-4) var(--pane-space-2) var(--pane-space-5);
+}
+.app-pane__title h1 { margin: 0; font-size: var(--pane-text-title-3); font-weight: var(--pane-weight-bold); letter-spacing: var(--pane-tracking-title); }
+.app-pane__title p { margin: 0; font-size: var(--pane-text-footnote); color: var(--pane-label-2); font-variant-numeric: tabular-nums; }
+.app-pane__search { padding: 0 var(--pane-space-4) var(--pane-space-3); }
+.app-pane__search .pane-input { min-height: 44px; font-size: var(--pane-text-subhead); }
+.app-pane__notices { display: flex; flex-direction: column; gap: var(--pane-space-2); padding: 0 var(--pane-space-4) var(--pane-space-3); }
+.app-pane__scroll { flex: 1; min-height: 0; overflow-y: auto; border-top: 1px solid var(--pane-separator); }
+.app-pane__placeholder { height: 100%; justify-content: center; }
+
+/* Message rows */
+.app-mail-list { list-style: none; margin: 0; padding: var(--pane-space-1) var(--pane-space-2); }
+.app-mail-list > li + li { border-top: 1px solid var(--pane-separator); }
+.app-mail-list > li:has(+ li > [aria-current="true"]),
+.app-mail-list > li:has(> [aria-current="true"]) { border-color: transparent; }
+.app-mail-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: var(--pane-space-3);
+  border: 0;
+  border-radius: var(--pane-radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--pane-duration-fast) var(--pane-ease);
+}
+/* A lighter hover than --pane-fill keeps gray preview text above 4.5:1. */
+.app-mail-row:hover { background: color-mix(in srgb, var(--pane-fill) 55%, transparent); }
+.app-mail-row[aria-current="true"] { background: var(--pane-accent-tint); }
+/* Gray secondary text is under 4.5:1 on the blue tint, so selected rows use the primary label. */
+.app-mail-row[aria-current="true"] :is(.app-mail-row__time, .app-mail-row__preview) { color: var(--pane-label); }
+.app-mail-row:focus-visible { outline-offset: -2px; }
+.app-mail-row__top { display: flex; align-items: baseline; gap: var(--pane-space-2); min-width: 0; }
+.app-mail-row__name {
+  flex: 1;
+  min-width: 0;
+  font-weight: var(--pane-weight-semibold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-mail-row__time { flex: none; font-size: var(--pane-text-footnote); color: var(--pane-label-2); font-variant-numeric: tabular-nums; }
+.app-mail-row__subject { font-size: var(--pane-text-subhead); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-mail-row__flag { display: inline-flex; align-items: center; gap: 3px; margin-right: 4px; color: var(--app-warning-text); }
+.app-mail-row__flag svg { width: 12px; height: 12px; }
+.app-mail-row__preview {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  font-size: var(--pane-text-subhead);
+  line-height: var(--pane-leading-snug);
+  color: var(--pane-label-2);
+  overflow-wrap: anywhere;
+}
+
+.app-mail-row__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.app-mail-row__flag--due { color: var(--pane-accent-text); }
+
+/*
+ * Scheduled timeline: days as headings, send times in a column, dots on a
+ * rail, and a red "now" line between what is due and what is still to come.
+ * The rail runs through the dot column; every size it depends on is a
+ * variable here so the line and the dots always meet.
+ */
+.app-timeline {
+  --tl-pad: var(--pane-space-3);
+  --tl-time: 4.75rem;
+  --tl-gap: var(--pane-space-3);
+  --tl-dot: 11px;
+  --tl-rail-x: calc(var(--tl-pad) + var(--tl-time) + var(--tl-gap) + var(--tl-dot) / 2);
+  padding: 0 var(--pane-space-2) var(--pane-space-3);
+}
+.app-timeline__day {
+  margin: 0;
+  padding: var(--pane-space-4) var(--tl-pad) var(--pane-space-1);
+  font-size: var(--pane-text-subhead);
+  font-weight: var(--pane-weight-semibold);
+}
+@media (min-width: 720px) {
+  /* The list pane scrolls on its own here, so the day stays in view. */
+  .app-pane--list .app-timeline__day { position: sticky; top: 0; z-index: 2; background: var(--pane-surface); }
+}
+.app-timeline__list { position: relative; list-style: none; margin: 0; padding: 0; }
+.app-timeline__list::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--tl-rail-x) - 0.5px);
+  width: 1px;
+  background: var(--pane-separator);
+}
+.app-tl-row {
+  display: grid;
+  grid-template-columns: var(--tl-time) var(--tl-dot) minmax(0, 1fr);
+  column-gap: var(--tl-gap);
+  align-items: start;
+  padding-inline: var(--tl-pad);
+}
+.app-tl-row__time {
+  padding-top: 1px;
+  text-align: right;
+  white-space: nowrap;
+  font-size: var(--pane-text-footnote);
+  font-variant-numeric: tabular-nums;
+  color: var(--pane-label-2);
+}
+.app-mail-row[aria-current="true"] .app-tl-row__time { color: var(--pane-label); }
+.app-tl-dot {
+  position: relative;
+  z-index: 1;
+  width: var(--tl-dot);
+  height: var(--tl-dot);
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--pane-accent);
+}
+/* Hollow dots: due now (accent) and waiting to retry (warning). Shape changes too, not only color. */
+.app-tl-dot--due,
+.app-tl-dot--retrying { background: var(--pane-surface); border: 2px solid var(--pane-accent); }
+.app-tl-dot--retrying { border-color: var(--app-warning-text); border-style: dashed; }
+
+.app-tl-now {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: var(--tl-time) minmax(0, 1fr);
+  column-gap: var(--tl-gap);
+  align-items: center;
+  padding: var(--pane-space-1) var(--tl-pad);
+}
+.app-tl-now__time {
+  text-align: right;
+  white-space: nowrap;
+  font-size: var(--pane-text-footnote);
+  font-weight: var(--pane-weight-semibold);
+  font-variant-numeric: tabular-nums;
+  color: var(--pane-danger);
+}
+.app-tl-now__line { position: relative; height: 2px; border-radius: 1px; background: var(--pane-danger); }
+.app-tl-now__line::before {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: calc(var(--tl-dot) / 2 - 5px);
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--pane-danger);
+}
+@media (forced-colors: active) {
+  /* Selection is a background colour normally, which high contrast removes. */
+  .app-folder[aria-current="page"],
+  .app-mail-row[aria-current="true"] {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
+  .app-folder[aria-current="page"] *,
+  .app-mail-row[aria-current="true"] * { color: HighlightText; }
+  /* Filled, tinted, gray and danger buttons are drawn by their fill; give them an edge. */
+  .pane-btn:not(.pane-btn--plain) { border: 1px solid ButtonText; }
+  .app-timeline__list::before,
+  .app-tl-dot,
+  .app-tl-now__line,
+  .app-tl-now__line::before { background: CanvasText; }
+  .app-tl-dot--due,
+  .app-tl-dot--retrying { background: Canvas; border-color: CanvasText; }
+}
+
+/* Detail */
+.app-detail-pane { display: flex; flex-direction: column; min-height: 100%; }
+.app-detail-pane__bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--pane-space-2);
+  min-height: 52px;
+  padding: var(--pane-space-2) var(--pane-space-4);
+  border-bottom: 1px solid var(--pane-separator);
+  background: var(--pane-surface);
+}
+.app-detail-pane__spacer { flex: 1; }
+.app-detail-pane__content {
+  width: 100%;
+  max-width: 760px;
+  padding: var(--pane-space-6) var(--pane-space-8) var(--pane-space-16);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pane-space-5);
+}
+.app-detail-pane__header { display: flex; flex-direction: column; align-items: flex-start; gap: var(--pane-space-3); }
+.app-detail-pane__header h2 { margin: 0; text-wrap: balance; }
+.app-detail-pane__header h2:focus { outline: none; }
+.app-detail-pane__people { display: flex; align-items: flex-start; gap: var(--pane-space-3); }
+.app-detail-pane__content .pane-separator { margin: 0; }
+.app-only-split, .app-only-phone { display: none; }
+.app-pane__actions { display: flex; align-items: center; gap: var(--pane-space-1); }
+
+/* Split: the list and the email share one column. */
+@media (max-width: 1079px) {
+  .app-shell { grid-template-columns: 212px minmax(0, 1fr); }
+  .app-panes { grid-template-columns: minmax(0, 1fr); }
+  .app-shell[data-view="list"] .app-pane--detail,
+  .app-shell[data-view="detail"] .app-pane--list { display: none; }
+  .app-pane--list { border-right: 0; }
+  .app-only-split { display: inline-flex; margin-left: calc(var(--pane-space-2) * -1); }
+}
+
+/* Phone: one column, page scrolls normally, folders become pills. */
+@media (max-width: 719px) {
+  .app-shell, .app-panes { display: block; height: auto; }
+  .app-sidebar {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--pane-space-2);
+    padding: var(--pane-space-3) var(--pane-gutter);
+    border-right: 0;
+    border-bottom: 1px solid var(--pane-separator);
+  }
+  .app-sidebar__compose { display: none; }
+  .app-only-phone { display: inline-flex; }
+  /* Pills wrap onto a second line on narrow screens rather than run off the edge. */
+  .app-folders { flex-direction: row; flex-wrap: wrap; gap: var(--pane-space-2); }
+  .app-folder { min-height: 44px; width: auto; gap: var(--pane-space-2); padding: 0 var(--pane-space-4); white-space: nowrap; border-radius: var(--pane-radius-pill); background: var(--pane-fill); }
+  .app-folder svg { display: none; }
+  .app-folder[aria-current="page"] { background: var(--pane-label); color: var(--pane-bg); }
+  .app-folder[aria-current="page"] svg { color: inherit; }
+  .app-folder[aria-current="page"] .app-folder__count { color: inherit; }
+  .app-sidebar__today { display: none; }
+  .app-pane__scroll { overflow: visible; }
+  .app-pane--detail { overflow: visible; }
+  .app-detail-pane__content { padding: var(--pane-space-5) var(--pane-gutter) var(--pane-space-12); }
+  .app-form-card { padding: var(--pane-space-5) var(--pane-space-4); }
+}

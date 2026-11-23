@@ -5,79 +5,67 @@ export interface EmailLog {
   id: string;
   emailId: string;
   status: string;
-  message: string;
-  metadata?: Record<string, any> | null;
+  message: string | null;
   createdAt: string;
 }
 
 export interface CreateEmailLogData {
   emailId: string;
-  status: string;
+  status: 'SCHEDULED' | 'RETRYING' | 'SENT' | 'FAILED';
   message: string;
-  metadata?: Record<string, any>;
 }
 
-/**
- * Create email log entry
- * POST /api/email-logs
- */
-export const createEmailLog = async (data: CreateEmailLogData): Promise<EmailLog> => {
-  try {
-    const { data: log, error } = await supabaseServiceClient
-      .from('email_logs')
-      .insert([
-        {
-          email_id: data.emailId,
-          status: data.status,
-          message: data.message,
-          created_at: new Date().toISOString(),
-        },
-      ])
-      .select()
-      .single();
+const transformLog = (row: any): EmailLog => ({
+  id: row.id,
+  emailId: row.email_id,
+  status: row.status,
+  message: row.message,
+  createdAt: row.created_at,
+});
 
-    if (error) throw error;
-    return log as EmailLog;
-  } catch (error: any) {
+export const createEmailLog = async (data: CreateEmailLogData): Promise<EmailLog> => {
+  const { data: log, error } = await supabaseServiceClient
+    .from('email_logs')
+    .insert([
+      {
+        email_id: data.emailId,
+        status: data.status,
+        message: data.message,
+        created_at: new Date().toISOString(),
+      },
+    ])
+    .select()
+    .single();
+
+  if (error) {
     logger.error('❌ Create email log error:', error);
     throw error;
   }
+  return transformLog(log);
 };
 
 /**
- * Get logs for an email
- * GET /api/email-logs/:emailId
+ * Audit logging must never fail the operation it describes, so this variant
+ * only reports errors.
  */
-export const getEmailLogs = async (emailId: string): Promise<EmailLog[]> => {
+export const tryCreateEmailLog = async (data: CreateEmailLogData): Promise<void> => {
   try {
-    const { data: logs, error } = await supabaseServiceClient
-      .from('email_logs')
-      .select('*')
-      .eq('email_id', emailId)
-      .order('created_at', { ascending: false });
+    await createEmailLog(data);
+  } catch {
+    // already logged
+  }
+};
 
-    if (error) throw error;
-    return (logs || []) as EmailLog[];
-  } catch (error: any) {
+export const getEmailLogs = async (emailId: string): Promise<EmailLog[]> => {
+  const { data: logs, error } = await supabaseServiceClient
+    .from('email_logs')
+    .select('*')
+    .eq('email_id', emailId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
     logger.error('❌ Get email logs error:', error);
     throw error;
   }
-};
-
-/**
- * Delete logs for an email
- * DELETE /api/email-logs/:emailId
- */
-export const deleteEmailLogs = async (emailId: string): Promise<void> => {
-  try {
-    const { error } = await supabaseServiceClient
-      .from('email_logs')
-      .delete()
-      .eq('email_id', emailId);
-
-    if (error) throw error;
-  } catch (error: any) {
-    logger.error('❌ Delete email logs error:', error);
-    throw error;
-  }
+  return (logs || []).map(transformLog);
 };

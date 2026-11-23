@@ -1,51 +1,31 @@
 # Build stage
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Copy package files
 COPY package*.json ./
-COPY prisma ./prisma/
-
-# Install dependencies
 RUN npm ci
 
-# Copy source code
-COPY . .
-
-# Generate Prisma client
-RUN npx prisma generate
-
-# Build TypeScript
+COPY tsconfig.json ./
+COPY src ./src
 RUN npm run build
 
 # Production stage
-FROM node:18-alpine
+FROM node:20-alpine
 
 WORKDIR /app
+ENV NODE_ENV=production
 
-# Copy package files
 COPY package*.json ./
-COPY prisma ./prisma/
+RUN npm ci --omit=dev && npm cache clean --force
 
-# Install production dependencies only
-RUN npm ci --only=production
-
-# Copy built files and Prisma schema
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 
-# Generate Prisma client
-RUN npx prisma generate
-
-# Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001
-
 USER nodejs
 
-# Expose port
 EXPOSE 5000
 
-# Start server
+# The API. The compose file runs the worker from the same image with `node dist/worker.js`.
 CMD ["node", "dist/server.js"]

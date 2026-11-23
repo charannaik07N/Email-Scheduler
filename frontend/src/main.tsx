@@ -3,8 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { GoogleOAuthProvider } from '@react-oauth/google'
 import './index.css'
 import App from './App.tsx'
-
-const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+import { GOOGLE_CLIENT_ID } from './config'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

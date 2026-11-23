@@ -1,5 +1,9 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// Database schema for the Supabase Postgres database.
+//
+// The app talks to the database through @supabase/supabase-js, not Prisma.
+// This file documents the tables and columns the code uses, and can create
+// them on a fresh database with `npm run prisma:push`.
+// Compare with your existing database before pushing to it.
 
 generator client {
   provider = "prisma-client-js"
@@ -10,108 +14,93 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// User model for authentication
+// Users sign in with Google only; no password is stored.
 model User {
-  id        String   @id @default(uuid())
+  id        String   @id @default(uuid()) @db.Uuid
   email     String   @unique
-  password  String
   name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   senders Sender[]
 
   @@map("users")
 }
 
-// Sender model - multiple senders can exist
+// The "From" identity. Without its own SMTP settings, a sender uses the
+// server's SMTP account and must use the owner's email address.
 model Sender {
-  id         String   @id @default(uuid())
-  name       String
-  email      String
-  smtpHost   String?
-  smtpPort   Int?
-  smtpUser   String?
-  smtpPass   String?
-  isActive   Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  name      String
+  email     String
+  smtpHost  String?  @map("smtp_host")
+  smtpPort  Int?     @map("smtp_port")
+  smtpUser  String?  @map("smtp_user")
+  smtpPass  String?  @map("smtp_pass")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   emails Email[]
 
+  @@index([userId])
+  // Also in the database, not expressible here: a partial unique index
+  // senders_one_shared_per_user on (user_id) WHERE smtp_host IS NULL
+  // (see supabase/schema.sql). Re-create it by hand after `prisma db push`.
   @@map("senders")
 }
 
-// Email model - stores all scheduled emails
 model Email {
-  id               String    @id @default(uuid())
-  
-  // Email content
-  recipientEmail   String
-  recipientName    String?
-  subject          String
-  body             String    @db.Text
-  htmlBody         String?   @db.Text
-  
-  // Scheduling
-  scheduledAt      DateTime
-  
-  // Status tracking
-  status           EmailStatus @default(PENDING)
-  sentAt           DateTime?
-  failedAt         DateTime?
-  errorMessage     String?   @db.Text
-  
-  // BullMQ job tracking
-  jobId            String?   @unique
-  
-  // Rate limiting and retry tracking
-  attemptCount     Int       @default(0)
-  maxAttempts      Int       @default(3)
-  nextRetryAt      DateTime?
-  
-  // Idempotency
-  idempotencyKey   String?   @unique
-  
-  // Metadata
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id             String      @id @default(uuid()) @db.Uuid
+  senderId       String      @map("sender_id") @db.Uuid
+  recipientEmail String      @map("recipient_email")
+  recipientName  String?     @map("recipient_name")
+  subject        String
+  body           String
+  htmlBody       String?     @map("html_body")
+  scheduledAt    DateTime    @map("scheduled_at") @db.Timestamptz
+  sentAt         DateTime?   @map("sent_at") @db.Timestamptz
+  status         EmailStatus @default(SCHEDULED)
+  attemptCount   Int         @default(0) @map("attempt_count")
+  errorMessage   String?     @map("error_message")
+  // Stored as "<userId>:<client key>", so keys are unique per user.
+  idempotencyKey String?     @unique @map("idempotency_key")
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
-  senderId String
-  sender   Sender @relation(fields: [senderId], references: [id], onDelete: Cascade)
-
-  logs EmailLog[]
+  // Restrict, as in supabase/schema.sql: a sender with emails can't be deleted
+  // by accident. The API deletes its sent and failed emails first, and refuses
+  // while any are unsent.
+  sender Sender     @relation(fields: [senderId], references: [id], onDelete: Restrict)
+  logs   EmailLog[]
 
   @@index([status])
-  @@index([scheduledAt])
   @@index([senderId, scheduledAt])
   @@map("emails")
 }
 
+// SCHEDULED: waiting in the queue
+// RETRYING:  a send attempt failed (or the hourly limit was hit) and it will be tried again
+// SENT:      delivered to the SMTP server
+// FAILED:    gave up after all attempts
+// Cancelled emails are deleted.
 enum EmailStatus {
-  PENDING      // Waiting to be sent
-  SCHEDULED    // Added to BullMQ queue
-  PROCESSING   // Currently being sent
-  SENT         // Successfully sent
-  FAILED       // Failed after all retries
-  RATE_LIMITED // Delayed due to rate limiting
+  SCHEDULED
+  RETRYING
+  SENT
+  FAILED
 }
 
-// Email log model - tracks all state changes
 model EmailLog {
-  id        String   @id @default(uuid())
-  emailId   String
+  id        String      @id @default(uuid()) @db.Uuid
+  emailId   String      @map("email_id") @db.Uuid
   status    EmailStatus
-  message   String?  @db.Text
-  metadata  String?  @db.Text // JSON string for additional data
-  createdAt DateTime @default(now())
+  message   String?
+  createdAt DateTime    @default(now()) @map("created_at") @db.Timestamptz
 
   email Email @relation(fields: [emailId], references: [id], onDelete: Cascade)
 
-  @@index([emailId])
-  @@index([createdAt])
+  @@index([emailId, createdAt])
   @@map("email_logs")
 }

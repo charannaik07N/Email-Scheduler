@@ -8,7 +8,7 @@ React + TypeScript + Vite frontend for the Email Scheduler application.
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 20+
 - Backend server running on port 5000
 
 ### Installation
@@ -29,10 +29,10 @@ cp .env.example .env
 Create a `.env` file in the frontend directory:
 
 ```env
-# Backend API URL
-VITE_API_URL=http://localhost:5000/api
+# Backend API base URL, including /api
+VITE_API_BASE_URL=http://localhost:5000/api
 
-# Google OAuth Client ID
+# Google OAuth Client ID (the backend's GOOGLE_CLIENT_ID must match)
 VITE_GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
 ```
 
@@ -62,49 +62,33 @@ The app will be available at **http://localhost:5173**
 frontend/
 ├── public/                 # Static assets
 ├── src/
-│   ├── assets/            # Images, icons
 │   ├── auth/              # Authentication
-│   │   ├── AuthContext.tsx    # Auth state management
-│   │   ├── GoogleAuth.tsx     # Google OAuth button
+│   │   ├── AuthContext.tsx    # Auth state, Google login, logout
+│   │   ├── GoogleAuth.tsx     # Google sign-in button
 │   │   ├── RequireAuth.tsx    # Protected route wrapper
-│   │   └── UserProfile.tsx    # User profile component
-│   ├── components/        # Reusable UI components
-│   │   ├── Badge.tsx          # Status badges
-│   │   ├── Button.tsx         # Button component
-│   │   ├── EmptyState.tsx     # Empty state display
-│   │   ├── Header.tsx         # App header
-│   │   ├── Input.tsx          # Input field
-│   │   ├── Loader.tsx         # Loading spinner
-│   │   ├── Modal.tsx          # Modal dialog
-│   │   ├── Table.tsx          # Data table/cards
-│   │   └── Textarea.tsx       # Textarea field
+│   │   └── index.ts           # Exports
 │   ├── pages/             # Application pages
-│   │   ├── Dashboard.tsx      # Main dashboard
+│   │   ├── Dashboard.tsx      # Stats, Scheduled/Sent tabs, detail view
 │   │   ├── Login.tsx          # Login page
-│   │   ├── ComposeEmail.tsx   # Compose new email
-│   │   ├── ScheduledEmails.tsx# Scheduled emails list
-│   │   └── SentEmails.tsx     # Sent emails list
+│   │   └── ComposeEmail.tsx   # Compose and schedule emails
 │   ├── services/          # API services
-│   │   ├── api.service.ts     # Axios instance
-│   │   ├── auth.service.ts    # Auth API calls
+│   │   ├── api.service.ts     # Axios client (token, 401 handling)
 │   │   └── email.service.ts   # Email API calls
 │   ├── types/             # TypeScript types
-│   │   ├── auth.types.ts      # Auth types
-│   │   ├── email.types.ts     # Email types
+│   │   ├── email.types.ts     # Email, sender, API types
 │   │   └── index.ts           # Type exports
 │   ├── utils/             # Utility functions
-│   │   ├── dateFormatter.ts   # Date formatting
-│   │   └── parseEmails.ts     # Email parsing
-│   ├── App.tsx            # Main app component
-│   ├── App.css            # App styles
-│   ├── main.tsx           # Entry point
-│   └── index.css          # Global styles
-├── .env                   # Environment variables
+│   │   ├── parseEmails.ts     # Recipient parsing (text, CSV/TXT)
+│   │   └── schedule.ts        # Send-time spacing, datetime helpers
+│   ├── config.ts          # API URL and Google client ID from env
+│   ├── App.tsx            # Routes
+│   ├── main.tsx           # Entry point (GoogleOAuthProvider)
+│   └── index.css          # Global styles (Tailwind)
+├── .env.example           # Environment template
 ├── index.html             # HTML template
 ├── package.json           # Dependencies
 ├── tsconfig.json          # TypeScript config
-├── vite.config.ts         # Vite config
-└── tailwind.config.js     # Tailwind config
+└── vite.config.ts         # Vite config (React + Tailwind plugins)
 ```
 
 ---
@@ -113,89 +97,74 @@ frontend/
 
 ### Google OAuth Login
 
+Sign-in is Google only.
+
 1. User clicks "Sign in with Google" button
 2. Google OAuth popup opens
 3. User grants permission
-4. Frontend receives Google credential (JWT)
-5. Frontend sends credential to backend `/api/auth/google`
-6. Backend verifies credential and returns app JWT
-7. JWT stored in localStorage
-8. User redirected to Dashboard
+4. Frontend receives the Google ID token (`credential`)
+5. Frontend sends it to the backend: `POST /api/auth/google-login` with `{ googleToken }`
+6. Backend verifies the token and returns an app JWT and the user
+7. JWT stored in localStorage (`authToken`), user in localStorage (`user`)
+8. User redirected to the Dashboard
 
 ### Protected Routes
 
-All routes except `/login` require authentication:
+Routes are defined in `App.tsx`:
 
 ```tsx
-<Route element={<RequireAuth />}>
-  <Route path="/" element={<Dashboard />} />
-  <Route path="/compose" element={<ComposeEmail />} />
-  {/* ... */}
-</Route>
+<Route path="/login" element={<Login />} />
+<Route
+  path="/dashboard"
+  element={
+    <RequireAuth>
+      <Dashboard />
+    </RequireAuth>
+  }
+/>
+<Route path="*" element={<Navigate to="/login" replace />} />
 ```
+
+Compose and the email detail view are views inside the Dashboard, not separate routes.
 
 ---
 
 ## 📡 API Services
 
-### Auth Service (`services/auth.service.ts`)
+### Auth (`auth/AuthContext.tsx`)
 
 ```typescript
-// Google OAuth login
-authService.googleLogin(credential: string): Promise<AuthResponse>
+const { user, loginWithGoogle, logout } = useAuth();
 
-// Get user profile
-authService.getProfile(): Promise<User>
+// Exchange the Google credential for an app token
+loginWithGoogle(credential: string): Promise<void>
 ```
 
 ### Email Service (`services/email.service.ts`)
 
 ```typescript
-// Get all emails
-emailService.getEmails(): Promise<Email[]>
+// SCHEDULED + RETRYING emails, paginated
+emailService.getScheduledEmails(page?, signal?)
 
-// Get scheduled emails
-emailService.getScheduledEmails(): Promise<Email[]>
+// SENT + FAILED emails, paginated
+emailService.getSentEmails(page?, signal?)
 
-// Get sent emails
-emailService.getSentEmails(): Promise<Email[]>
+// Counts; sends the browser's timezone offset
+emailService.getEmailStats(signal?)
 
-// Create/schedule email
-emailService.createEmail(data: CreateEmailData): Promise<Email>
+emailService.getSenders()
 
-// Cancel scheduled email
-emailService.cancelEmail(id: string): Promise<void>
+// POST /emails/schedule/bulk
+emailService.scheduleBulk(request: BulkScheduleRequest)
+
+// DELETE /emails/:id
+emailService.cancelScheduledEmail(emailId: string)
+
+// POST /emails/:id/retry
+emailService.retryFailedEmail(emailId: string)
 ```
 
----
-
-## 🎨 UI Components
-
-### Table Component
-
-Displays emails as cards with responsive design:
-
-```tsx
-<Table
-  columns={["Recipient", "Subject", "Status", "Scheduled"]}
-  data={emails.map((email) => [
-    email.recipientEmail,
-    email.subject,
-    email.status,
-    formatDate(email.scheduledAt),
-  ])}
-/>
-```
-
-### Badge Component
-
-Status indicators:
-
-```tsx
-<Badge variant="success">SENT</Badge>
-<Badge variant="warning">SCHEDULED</Badge>
-<Badge variant="error">FAILED</Badge>
-```
+All methods return `ApiResponse<T>` (`{ success, data?, message?, error? }`) instead of throwing.
 
 ---
 
@@ -227,19 +196,21 @@ Status indicators:
 
 ## 🌐 Environment Variables
 
-| Variable                | Required | Description            |
-| ----------------------- | -------- | ---------------------- |
-| `VITE_API_URL`          | Yes      | Backend API URL        |
-| `VITE_GOOGLE_CLIENT_ID` | Yes      | Google OAuth Client ID |
+| Variable                | Required | Description                                                                   |
+| ----------------------- | -------- | ----------------------------------------------------------------------------- |
+| `VITE_API_BASE_URL`     | Yes      | Backend API URL including `/api` (`VITE_API_URL` is still accepted as a fallback) |
+| `VITE_GOOGLE_CLIENT_ID` | Yes      | Google OAuth Client ID; must match the backend's `GOOGLE_CLIENT_ID`           |
+
+In development, if `VITE_API_BASE_URL` is unset, `config.ts` falls back to `http://localhost:5000/api`.
 
 ---
 
 ## 📝 Notes
 
-- All API requests include JWT token in Authorization header
-- Token is stored in localStorage under `user` key
-- Axios interceptor automatically attaches token to requests
-- 401 responses trigger automatic logout
+- All API requests include the JWT in the `Authorization: Bearer` header
+- Token is stored in localStorage under `authToken`; the user under `user`
+- Axios interceptor automatically attaches the token to requests
+- 401 responses sign the user out; an expired stored token is discarded on load
 
 ---
 
@@ -249,30 +220,26 @@ Status indicators:
 
 #### 1. Google OAuth Authentication
 
-**Files:** `auth/GoogleAuth.tsx`, `auth/AuthContext.tsx`
+**Files:** `main.tsx`, `auth/GoogleAuth.tsx`, `auth/AuthContext.tsx`
 
 **Flow:**
 
-1. User clicks "Sign in with Google" button
-2. Google OAuth popup opens via `@react-oauth/google`
-3. User grants permission
-4. Frontend receives credential (JWT)
-5. Credential sent to backend: `POST /api/auth/google`
-6. Backend verifies and returns app JWT
-7. JWT stored in localStorage
-8. User redirected to Dashboard
+1. `main.tsx` wraps the app in `GoogleOAuthProvider` with `GOOGLE_CLIENT_ID` from `config.ts`
+2. `GoogleAuth.tsx` renders `GoogleLogin`
+3. On success, the credential goes to `loginWithGoogle`
+4. `AuthContext` posts `{ googleToken: credential }` to `/auth/google-login`
+5. Token and user are saved to localStorage and React state
+6. `Login.tsx` redirects to `/dashboard`
 
 **Code:**
 
 ```tsx
 // auth/GoogleAuth.tsx
-<GoogleOAuthProvider clientId={clientId}>
-  <GoogleLogin
-    onSuccess={(credentialResponse) => {
-      authService.googleLogin(credentialResponse.credential);
-    }}
-  />
-</GoogleOAuthProvider>
+<GoogleLogin
+  onSuccess={(credentialResponse) => {
+    loginWithGoogle(credentialResponse.credential);
+  }}
+/>
 ```
 
 #### 2. Protected Routes
@@ -282,53 +249,29 @@ Status indicators:
 **Implementation:**
 
 ```tsx
-export const RequireAuth = () => {
-  const { user } = useAuth();
+export const RequireAuth = ({ children }) => {
+  const { user, isLoading } = useAuth();
+  const location = useLocation();
 
+  if (isLoading) return null;
   if (!user) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   }
-
-  return <Outlet />;
+  return children;
 };
 ```
 
-**Usage in App.tsx:**
-
-```tsx
-<Route element={<RequireAuth />}>
-  <Route path="/" element={<Dashboard />} />
-  <Route path="/compose" element={<ComposeEmail />} />
-  <Route path="/scheduled" element={<ScheduledEmails />} />
-  <Route path="/sent" element={<SentEmails />} />
-</Route>
-```
-
-#### 3. Dashboard with Real-time Stats
+#### 3. Dashboard
 
 **File:** `pages/Dashboard.tsx`
 
 **Features:**
 
-- Display counts: Total, Scheduled, Sent, Failed
-- Show recent emails
-- Search and filter functionality
-- Card-based responsive layout
-
-**Data Fetching:**
-
-```tsx
-const fetchEmails = async () => {
-  const data = await emailService.getEmails();
-  setEmails(data);
-
-  // Calculate stats
-  setTotalEmails(data.length);
-  setScheduledCount(data.filter((e) => e.status === "SCHEDULED").length);
-  setSentCount(data.filter((e) => e.status === "SENT").length);
-  setFailedCount(data.filter((e) => e.status === "FAILED").length);
-};
-```
+- Stats from `GET /emails/stats` (scheduled, sent, failed, pending today)
+- **Scheduled** tab (`SCHEDULED`, `RETRYING`) and **Sent** tab (`SENT`, `FAILED`), 50 per page with "load more"
+- Search
+- Refreshes every 30 seconds while the list is shown
+- **Detail view** for an email, with **Cancel email** (scheduled/retrying) and **Retry now** (failed)
 
 #### 4. Compose Email Form
 
@@ -337,206 +280,91 @@ const fetchEmails = async () => {
 **Features:**
 
 - Sender selection dropdown
-- Recipient email validation
-- Subject and body inputs
-- Date/time picker for scheduling
-- Form validation
+- Recipients typed, pasted, or uploaded from a CSV/TXT file (deduplicated)
+- Subject and rich-text body
+- **Send Later**: date/time picker or quick picks ("Tomorrow, 11:00 AM", ...)
+- **Delay between 2 emails (seconds)** and **Hourly Limit (0 = none)**
 
-**Submit Handler:**
+**Send spacing:** The delay and hourly limit are applied in the browser. `utils/schedule.ts` (`buildSendTimes`) gives each recipient its own send time: each email is at least the delay after the previous one, and email *i* is never earlier than `start + floor(i / hourlyLimit)` hours.
 
-```tsx
-const handleSubmit = async (e) => {
-  const emailData = {
-    senderId: selectedSender,
-    recipientEmail,
-    subject,
-    body,
-    scheduledAt: new Date(scheduledDate).toISOString(),
-  };
-
-  await emailService.createEmail(emailData);
-  navigate("/");
-};
-```
-
-#### 5. Card-Based Table Component
-
-**File:** `components/Table.tsx`
-
-**Design:**
-
-- Responsive cards instead of traditional tables
-- First 2 columns on left, remaining on right
-- Status badges with colors
-- Empty state when no data
-
-**Structure:**
+**Submit:** Recipients are sent with `POST /emails/schedule/bulk` in chunks of 500, each with its `scheduledAt` and an idempotency key (`<draftId>:<email>`). On a partial failure, only the unscheduled recipients stay in the form, so trying again doesn't create duplicates.
 
 ```tsx
-<div className="space-y-3">
-  {data.map((row, index) => (
-    <div className="bg-white rounded-lg p-4 shadow-sm">
-      <div className="flex justify-between">
-        <div>
-          <div>{row[0]}</div> {/* First column */}
-          <div>{row[1]}</div> {/* Second column */}
-        </div>
-        <div className="text-right">
-          {row.slice(2).map((cell) => (
-            <div>{cell}</div>
-          ))}
-        </div>
-      </div>
-    </div>
-  ))}
-</div>
+const sendTimes = buildSendTimes(start, recipients.length, delayBetweenEmails, hourlyLimit);
+const items = recipients.map((recipient, i) => ({
+  recipientEmail: recipient.email,
+  recipientName: recipient.name || undefined,
+  scheduledAt: sendTimes[i].toISOString(),
+  idempotencyKey: `${draftId.current}:${recipient.email}`,
+}));
+
+await emailService.scheduleBulk({ senderId, subject, body, htmlBody, recipients: chunk });
 ```
 
-#### 6. API Service Layer
+#### 5. API Service Layer
 
 **File:** `services/api.service.ts`
 
 **Features:**
 
-- Centralized Axios instance
+- Centralized Axios instance with `baseURL` = `API_BASE_URL` from `config.ts`
 - Automatic JWT token attachment
-- Request/response interceptors
-- Error handling
+- 401 handler that signs the user out through `AuthContext`
+- Errors (including partial bulk results) returned as `ApiResponse` instead of thrown
 
 **Implementation:**
 
 ```tsx
-const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL,
-});
+this.client = axios.create({ baseURL: API_BASE_URL });
 
 // Request interceptor - add token
-api.interceptors.request.use((config) => {
-  const user = JSON.parse(localStorage.getItem("user") || "{}");
-  if (user.token) {
-    config.headers.Authorization = `Bearer ${user.token}`;
-  }
+this.client.interceptors.request.use((config) => {
+  const token = localStorage.getItem(AUTH_TOKEN_KEY);
+  if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
 // Response interceptor - handle 401
-api.interceptors.response.use(
+this.client.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem("user");
-      window.location.href = "/login";
-    }
+    if (error.response?.status === 401) this.onUnauthorized?.();
     return Promise.reject(error);
   },
 );
 ```
 
-#### 7. Date Formatting
-
-**File:** `utils/dateFormatter.ts`
-
-**Implementation:**
-
-```tsx
-export const formatDate = (dateString: string): string => {
-  const date = new Date(dateString);
-  return new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-};
-```
-
-**Usage:**
-
-```tsx
-{
-  formatDate(email.scheduledAt);
-} // → "Jan 30, 2026, 7:30 PM"
-```
-
-#### 8. Email Parsing Utility
+#### 6. Email Parsing Utility
 
 **File:** `utils/parseEmails.ts`
 
-**Purpose:** Parse comma/semicolon-separated email lists
+- `parseEmails(text)` - extract every email address from typed or pasted text
+- `parseRecipientsText(text)` / `parseCSV(file)` - one recipient per line, with an optional name column (comma, semicolon, or tab separated)
+- `dedupeRecipients(list)` - remove duplicates
 
-**Implementation:**
+#### 7. Status Badges
 
-```tsx
-export const parseEmails = (input: string): string[] => {
-  return input
-    .split(/[,;]/)
-    .map((email) => email.trim())
-    .filter((email) => email.length > 0);
-};
-```
+**File:** `pages/Dashboard.tsx` (`STATUS_BADGE`)
 
-#### 9. Status Badges
-
-**File:** `components/Badge.tsx`
-
-**Variants:**
-
-- `success` (green) - SENT
-- `warning` (yellow) - SCHEDULED
-- `error` (red) - FAILED
-- `default` (gray) - Other
-
-**Implementation:**
-
-```tsx
-const variants = {
-  success: "bg-green-100 text-green-800",
-  warning: "bg-yellow-100 text-yellow-800",
-  error: "bg-red-100 text-red-800",
-  default: "bg-gray-100 text-gray-800",
-};
-```
+- `SENT` (green)
+- `SCHEDULED` (orange)
+- `RETRYING` (yellow)
+- `FAILED` (red)
 
 ---
 
 ## 🎨 UI/UX Implementation Details
 
-### Design System
+### Styling
 
-**Colors:**
-
-- Primary: `#49a34b` (green)
-- Backgrounds: `#e9f5ed` (pale green), `#f9fafb` (gray)
-- Text: `#000000` (black headings), `#6b7280` (gray body)
-
-**Components:**
-
-- Buttons: Rounded with hover effects
-- Inputs: Border with focus states
-- Cards: Shadow on hover
-- Badges: Rounded pill shape
-
-### Responsive Design
-
-**Breakpoints:**
-
-- Mobile: < 640px
-- Tablet: 640px - 1024px
-- Desktop: > 1024px
-
-**Implementation:**
-
-```tsx
-className = "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4";
-```
+Tailwind CSS 4 utility classes (via `@tailwindcss/vite`), with green accents and gray text.
 
 ### State Management
 
 **Global State:**
 
 - Auth: `AuthContext.tsx` (React Context)
-- User info stored in localStorage
+- Token and user info stored in localStorage
 
 **Local State:**
 
@@ -546,14 +374,12 @@ className = "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4";
 
 ### Error Handling
 
-**API Errors:**
+**API Errors:** Service calls return `{ success, error }`, so components check the result instead of catching:
 
 ```tsx
-try {
-  await emailService.createEmail(data);
-  setSuccess("Email scheduled successfully!");
-} catch (error) {
-  setError(error.response?.data?.message || "Failed to schedule email");
+const response = await emailService.cancelScheduledEmail(email.id);
+if (!response.success) {
+  setActionError(response.error || 'Failed to cancel the email');
 }
 ```
 
@@ -561,7 +387,8 @@ try {
 
 - Email format validation
 - Required field checks
-- Date validation (future dates only)
+- Schedule time must not be in the past
+- Delay and hourly limit cannot be negative
 
 ---
 
@@ -598,25 +425,11 @@ npm run preview
 ```bash
 npm run lint
 # - ESLint checks
-# - TypeScript errors
-# - Code style issues
 ```
 
 ---
 
 ## 🔧 Customization Guide
-
-### Change Color Scheme
-
-Edit `index.css` and component files:
-
-```css
-/* Primary color */
---primary: #49a34b;
-
-/* Backgrounds */
---bg-light: #e9f5ed;
-```
 
 ### Add New Route
 
@@ -624,18 +437,17 @@ Edit `index.css` and component files:
 2. Add route in `App.tsx`:
 
 ```tsx
-<Route path="/new-page" element={<NewPage />} />
+<Route path="/new-page" element={<RequireAuth><NewPage /></RequireAuth>} />
 ```
 
 ### Add New API Endpoint
 
-1. Add function in `services/email.service.ts`:
+1. Add a method in `services/email.service.ts`:
 
 ```tsx
-export const newEndpoint = async () => {
-  const { data } = await api.get("/new-endpoint");
-  return data;
-};
+newEndpoint(): Promise<ApiResponse<Result>> {
+  return apiClient.get('/emails/new-endpoint');
+},
 ```
 
 2. Use in component:
@@ -648,14 +460,14 @@ const result = await emailService.newEndpoint();
 
 ## 📚 Key Dependencies Explained
 
-| Package               | Purpose                  | Used In                |
-| --------------------- | ------------------------ | ---------------------- |
-| `@react-oauth/google` | Google OAuth integration | `auth/GoogleAuth.tsx`  |
-| `react-router-dom`    | Client-side routing      | `App.tsx`, navigation  |
-| `axios`               | HTTP client              | `services/*.ts`        |
-| `jwt-decode`          | Decode JWT tokens        | `auth/AuthContext.tsx` |
-| `tailwindcss`         | Utility-first CSS        | All components         |
-| `vite`                | Build tool & dev server  | Build process          |
+| Package               | Purpose                  | Used In                             |
+| --------------------- | ------------------------ | ----------------------------------- |
+| `@react-oauth/google` | Google OAuth integration | `main.tsx`, `auth/GoogleAuth.tsx`   |
+| `react-router-dom`    | Client-side routing      | `App.tsx`, navigation               |
+| `axios`               | HTTP client              | `services/api.service.ts`, `auth/AuthContext.tsx` |
+| `jwt-decode`          | Read token expiry        | `auth/AuthContext.tsx`              |
+| `tailwindcss`         | Utility-first CSS        | All components                      |
+| `vite`                | Build tool & dev server  | Build process                       |
 
 ---
 
@@ -674,6 +486,7 @@ Open Browser DevTools → Network tab:
 Console:
 
 ```javascript
+localStorage.getItem("authToken");
 JSON.parse(localStorage.getItem("user"));
 ```
 
@@ -689,19 +502,19 @@ Install React DevTools extension:
 
 **Issue: "401 Unauthorized"**
 
-- Check token in localStorage
+- Sign in again (tokens expire after 7 days)
 - Verify backend is running
-- Check CORS settings
+- Check CORS settings (`CORS_ORIGIN` in the backend)
 
 **Issue: "Network Error"**
 
-- Verify backend URL in `.env`
+- Verify `VITE_API_BASE_URL` in `.env`
 - Check backend is running on port 5000
 
 **Issue: Google OAuth not working**
 
-- Verify Client ID in `.env`
-- Check authorized origins in Google Console
+- Verify `VITE_GOOGLE_CLIENT_ID` in `.env` matches the backend's `GOOGLE_CLIENT_ID`
+- Check authorized JavaScript origins in Google Console (e.g. `http://localhost:5173`)
 - Clear browser cache
 
 ---
