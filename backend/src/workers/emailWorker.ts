@@ -1,6 +1,6 @@
 import { DelayedError, Job, UnrecoverableError, Worker } from 'bullmq';
 import { Transporter } from 'nodemailer';
-import redis from '../config/redis';
+import redis, { describeRedisError, isConnectionError } from '../config/redis';
 import {
   SHARED_SMTP_HOST,
   SHARED_SMTP_USER,
@@ -352,7 +352,11 @@ export const startEmailWorker = (): Worker<EmailJobData> => {
   worker.on('ready', () => logger.info(`🚀 Email worker started (concurrency ${WORKER_CONCURRENCY})`));
   worker.on('completed', (job) => logger.info(`✅ Worker completed job ${job.id}`));
   worker.on('failed', (job, error) => logger.error(`❌ Worker failed job ${job?.id}: ${error.message}`));
-  worker.on('error', (error) => logger.error('❌ Worker error:', error));
+  worker.on('error', (error) => {
+    // An unreachable Redis is reported once by its connection; don't repeat it per retry.
+    if (isConnectionError(error)) return;
+    logger.error(`❌ Worker error: ${describeRedisError(error)}`);
+  });
 
   return worker;
 };

@@ -230,8 +230,8 @@ export const ComposeEmail = ({ onCancel, onScheduled }: ComposeEmailProps) => {
     setFieldError(
       'to',
       invalid.length === 1
-        ? `"${rest}" isn't an email address. Enter one like name@example.com.`
-        : `${invalid.length} entries aren't email addresses. Enter addresses like name@example.com, separated by commas.`
+        ? `“${rest}” isn’t an email address. Enter one like name@example.com.`
+        : `${invalid.length} entries aren’t email addresses. Enter addresses like name@example.com, separated by commas.`
     );
     const field = recipientInputRef.current;
     if (field && document.activeElement === field) requestAnimationFrame(() => field.select());
@@ -314,7 +314,7 @@ export const ComposeEmail = ({ onCancel, onScheduled }: ComposeEmailProps) => {
     // Each problem shows under its field; focus goes to the first one, in form order.
     const problems: FieldErrors = {};
     // Text left in the To field is what wasn't an address when it was added.
-    if (recipientInput.trim()) problems.to = fieldErrors.to ?? `Fix or remove "${recipientInput.trim()}".`;
+    if (recipientInput.trim()) problems.to = fieldErrors.to ?? `Fix or remove “${recipientInput.trim()}”.`;
     else if (recipients.length === 0) problems.to = 'Add at least one recipient, like name@example.com.';
     if (!trimmedSubject) problems.subject = 'Enter a subject.';
     if (!textBody) problems.body = 'Write a message.';

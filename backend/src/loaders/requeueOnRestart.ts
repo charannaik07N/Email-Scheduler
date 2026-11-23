@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { redisCommands } from '../config/redis';
+import { describeRedisError, redisCommands } from '../config/redis';
 import { addEmailToQueue, getCompletedJobResult, JobActiveError } from '../queues/emailQueue';
 import * as EmailService from '../services/email.service';
 import { logger } from '../utils/logger';
@@ -37,7 +37,7 @@ export const requeuePendingEmails = async (): Promise<RequeueOutcome> => {
   try {
     locked = await redisCommands.set(REQUEUE_LOCK_KEY, token, 'EX', REQUEUE_LOCK_TTL_SECONDS, 'NX');
   } catch (error) {
-    logger.error('❌ Could not reach Redis to requeue unsent emails:', (error as Error).message);
+    logger.error(`❌ Could not reach Redis to requeue unsent emails: ${describeRedisError(error as Error)}`);
     return 'unavailable';
   }
   if (locked !== 'OK') {

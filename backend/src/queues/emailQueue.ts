@@ -1,5 +1,5 @@
 import { Queue } from 'bullmq';
-import redis from '../config/redis';
+import redis, { describeRedisError, isConnectionError } from '../config/redis';
 import { logger } from '../utils/logger';
 
 export const EMAIL_QUEUE_NAME = 'email-queue';
@@ -33,7 +33,9 @@ export const emailQueue = new Queue<EmailJobData>(EMAIL_QUEUE_NAME, {
 });
 
 emailQueue.on('error', (error) => {
-  logger.error('❌ Email queue error:', error);
+  // Its connection already reports an unreachable Redis, once per outage.
+  if (isConnectionError(error)) return;
+  logger.error(`❌ Email queue error: ${describeRedisError(error)}`);
 });
 
 export type AddJobResult = 'queued' | 'already-queued' | 'completed';

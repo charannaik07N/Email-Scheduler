@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import type { KeyboardEvent, ReactNode, RefObject } from 'react';
 import {
   CalendarClock,
@@ -23,6 +24,9 @@ import { Avatar, Notice, SkipLink, StatusBadge, TopBar } from '../ui';
 import { dayLabel, groupByDay, timeLabel } from '../utils/timeline';
 
 type Folder = 'scheduled' | 'sent' | 'failed';
+
+const isFolder = (value: string | null): value is Folder =>
+  value === 'scheduled' || value === 'sent' || value === 'failed';
 
 interface ListState {
   emails: Email[];
@@ -69,7 +73,7 @@ const FOLDERS: {
     Icon: TriangleAlert,
     load: emailService.getFailedEmails,
     count: (s) => s.totalFailed,
-    empty: { title: 'No failed emails', text: "Emails that couldn't be delivered appear here, ready to retry." },
+    empty: { title: 'No failed emails', text: 'Emails that couldn’t be delivered appear here, ready to retry.' },
   },
 ];
 
@@ -134,9 +138,16 @@ const toListState = (response: ApiResponse<PaginatedResponse<Email>>, previous?:
 
 export const Dashboard = () => {
   const { user, logout } = useAuth();
-  const [folder, setFolder] = useState<Folder>('scheduled');
+  // The folder and the open email live in the URL (?folder=sent&email=<id>), so
+  // a refresh or a shared link reopens them and Back steps through them.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const folderParam = searchParams.get('folder');
+  const folder: Folder = isFolder(folderParam) ? folderParam : 'scheduled';
+  const selectedId = searchParams.get('email');
   const [isComposing, setIsComposing] = useState(false);
-  const [selected, setSelected] = useState<Email | null>(null);
+  // The email last opened from the list, kept in case a refresh moves it out
+  // of the loaded lists while it is open.
+  const [openedEmail, setOpenedEmail] = useState<Email | null>(null);
   const [lists, setLists] = useState<Record<Folder, ListState>>(EMPTY_LISTS);
   const [stats, setStats] = useState<EmailStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -148,6 +159,15 @@ export const Dashboard = () => {
   const [searchQuery, setSearchQuery] = useState('');
   // Moves the timeline's "now" line. Local only, no requests.
   const [now, setNow] = useState(() => Date.now());
+  // The open email: the fresh copy from the lists when it's there, otherwise the
+  // one that was opened. Nothing is open unless the URL names it.
+  const selected =
+    (selectedId &&
+      (Object.values(lists)
+        .flatMap((list) => list.emails)
+        .find((email) => email.id === selectedId) ??
+        (openedEmail?.id === selectedId ? openedEmail : null))) ||
+    null;
   const fetchController = useRef<AbortController | null>(null);
   // Folders showing more than page 1. Refreshes only reload page 1, so they
   // leave these folders alone (stats and the other folders still update).
@@ -269,8 +289,25 @@ export const Dashboard = () => {
 
   const isSplit = () => window.matchMedia(SPLIT_QUERY).matches;
 
+  /**
+   * Show an email (or none) and record it in the URL. Opening one from the list
+   * adds a history entry, so Back closes it; moving between emails replaces it.
+   */
+  const selectEmail = (email: Email | null) => {
+    setOpenedEmail(email);
+    setSearchParams(
+      (params) => {
+        const next = new URLSearchParams(params);
+        if (email) next.set('email', email.id);
+        else next.delete('email');
+        return next;
+      },
+      { replace: Boolean(selectedId) || !email }
+    );
+  };
+
   const openEmail = (email: Email) => {
-    setSelected(email);
+    selectEmail(email);
     setActionError('');
     // When the detail replaces the list, move focus to it so keyboard and
     // screen reader users land on what just opened.
@@ -279,16 +316,31 @@ export const Dashboard = () => {
 
   const closeEmail = () => {
     const id = selected?.id;
-    setSelected(null);
+    selectEmail(null);
     setActionError('');
     if (id) requestAnimationFrame(() => rowRefs.current.get(id)?.focus());
   };
 
   const switchFolder = (next: Folder) => {
-    setFolder(next);
-    setSelected(null);
     setActionError('');
+    if (next === folder && !selectedId) return;
+    // A folder change is its own history entry; the open email doesn't carry over.
+    setSearchParams(next === 'scheduled' ? {} : { folder: next });
   };
+
+  // A link or a refresh can name an email that isn't loaded (sent long ago,
+  // cancelled): once loading is done, drop it from the URL.
+  useEffect(() => {
+    if (!selectedId || selected || isLoading) return;
+    setSearchParams(
+      (params) => {
+        const next = new URLSearchParams(params);
+        next.delete('email');
+        return next;
+      },
+      { replace: true }
+    );
+  }, [selectedId, selected, isLoading, setSearchParams]);
 
   const confirmCancel = async () => {
     if (!selected) return;
@@ -298,7 +350,7 @@ export const Dashboard = () => {
     cancelDialog.current?.close();
     if (response.success) {
       setSuccess(`The email to ${selected.recipientEmail} was cancelled.`);
-      setSelected(null);
+      selectEmail(null);
       reload();
     } else {
       setActionError(response.error || 'Failed to cancel the email');
@@ -376,11 +428,14 @@ export const Dashboard = () => {
             {email.status === 'RETRYING' && (
               <span className="app-mail-row__flag">
                 <RotateCcw aria-hidden="true" />
-                Retrying ·
+                Retrying
+                <span className="pane-visually-hidden">: </span>
               </span>
             )}
             {email.status === 'SCHEDULED' && onTimeline && when && when.getTime() <= now && (
-              <span className="app-mail-row__flag app-mail-row__flag--due">Sending now ·</span>
+              <span className="app-mail-row__flag app-mail-row__flag--due">
+                Sending now<span className="pane-visually-hidden">: </span>
+              </span>
             )}
             {email.subject || 'No subject'}
           </span>
@@ -546,8 +601,16 @@ export const Dashboard = () => {
 
             <div className="app-pane__scroll">
               {isLoading ? (
-                <div className="app-center" style={{ padding: 'var(--pane-space-16)' }}>
-                  <span className="pane-spinner app-spinner-lg" aria-label="Loading emails" role="status" />
+                // A skeleton in the shape of the rows that are coming.
+                <div className="app-skeleton" role="status">
+                  <span className="pane-visually-hidden">Loading emails</span>
+                  {[0, 1, 2, 3, 4].map((i) => (
+                    <div key={i} className="app-skeleton__row" aria-hidden="true">
+                      <span className="app-skeleton__bar app-skeleton__bar--name" />
+                      <span className="app-skeleton__bar app-skeleton__bar--subject" />
+                      <span className="app-skeleton__bar" />
+                    </div>
+                  ))}
                 </div>
               ) : visibleEmails.length === 0 ? (
                 <div className="app-empty">
@@ -635,7 +698,7 @@ export const Dashboard = () => {
         <div className="pane-dialog__body">
           <h2 id="cancel-title" className="pane-dialog__title">Cancel this email?</h2>
           <p id="cancel-text" className="pane-dialog__text">
-            The email to {selected?.recipientEmail} won't be sent. This can't be undone.
+            The email to {selected?.recipientEmail} won’t be sent. This can’t be undone.
           </p>
         </div>
         <div className="pane-dialog__actions">

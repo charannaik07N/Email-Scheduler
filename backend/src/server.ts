@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import type { Server } from 'http';
 import app from './app';
-import { testRedisConnection, disconnectRedis } from './config/redis';
+import { describeRedisError, testRedisConnection, disconnectRedis } from './config/redis';
 import { verifyMailConnection, defaultTransporter } from './config/mailer';
 import { closeQueue } from './queues/emailQueue';
 import { startEmailWorker, closeWorker } from './workers/emailWorker';
@@ -21,7 +21,7 @@ const startServer = async () => {
   try {
     await testRedisConnection();
   } catch (error) {
-    logger.warn('⚠️  Redis is not reachable; scheduling will fail until it is:', (error as Error).message);
+    logger.warn(`⚠️  Redis is not reachable, so scheduling will fail until it is: ${describeRedisError(error as Error)}`);
   }
 
   // Background check: a slow SMTP server shouldn't delay startup.

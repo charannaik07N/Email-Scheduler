@@ -1,3 +1,17 @@
+/* Hallmark · shape: app screen · genre: modern-minimal · theme: brand (Pane) · surface: absolute
+ * nav: top bar with a three-folder sidebar (kept) · signature: the send timeline (kept) · states: loading, empty, error, full
+ * axes: light/grotesk-sans/cool · posture: restrained · contrast: pass · v2.0.0 */
+/* Hallmark · built: the project · redesign: polish */
+/* Hallmark · waive 7b · surface: absolute in dark mode only, label 15.6:1 and links 5.5:1 on it · the dark mailbox sits on true black so the sidebar, timeline and detail read as lit panes on an OLED screen */
+/* Hallmark · waive 39b · the 120px buttons are whole mail rows in the scheduled timeline, not controls · each email row is one button so a click or Return opens that email in the detail pane */
+/* Hallmark · dismissed 29 · the only blur is the sticky top bar's glass and the cancel dialog's backdrop; no glow, orb or bloom sits behind any text */
+/* Hallmark · dismissed 56 · the day headings stick inside the list pane's own scroller, a separate scroll area from the page, so they never slide under the top bar (checked at 1280 and 1440) */
+/* Hallmark · dismissed 73 · measured each mail row: the name, subject and preview boxes stack without overlapping; the preview is clamped to two lines inside its own box */
+/* Hallmark · dismissed 3 · the side bar is on blockquotes in the compose editor, the usual mark of quoted text in an email body, not a card stripe */
+/* Hallmark · dismissed 49 · the long label is hidden screen-reader text; the visible row reads name, subject and preview, and a mail row is meant to wrap */
+/* Hallmark · dismissed 70 · the line is a preview of the send plan shown before scheduling; the success notice appears only after the schedule request returns */
+/* Hallmark · answered F24 · the hairline is the glass bar's light edge and the shadow appears only once the mailbox scrolls; both are Pane's glass material */
+
 @import "tailwindcss";
 
 /* Pane design system (copied unchanged from the Pane assets), then app pieces.
